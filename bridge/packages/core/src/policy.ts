@@ -1,0 +1,67 @@
+// Access policy — mirror of docs/protocol/ndp-v1.md §10 and agent/common/src/ndp_policy.c.
+import type { Mode } from "./constants.ts";
+import { Status, type StatusName } from "./constants.ts";
+import { normalizePath, pathInside, PathInvalidError } from "./path.ts";
+
+export interface PolicyConfig {
+  readRoots: readonly string[];
+  writeRoots: readonly string[];
+  neverRead: readonly string[];
+  neverWrite: readonly string[];
+}
+
+export type Operation = "read" | "write";
+
+export interface PolicyDecision {
+  status: StatusName;
+  code: number;
+  /** Normalized path (only when status is OK). */
+  normalized?: string;
+}
+
+export const DEFAULT_POLICY: PolicyConfig = Object.freeze({
+  readRoots: Object.freeze(["/"]),
+  writeRoots: Object.freeze(["/3ds/nintendo-dev-agent"]),
+  neverRead: Object.freeze(["/3ds/nintendo-dev-agent/config"]),
+  neverWrite: Object.freeze([
+    "/Nintendo 3DS",
+    "/luma",
+    "/boot.firm",
+    "/gm9",
+    "/private",
+    "/3ds/nintendo-dev-agent/config",
+  ]),
+});
+
+/** Normalizes every list entry; throws PathInvalidError for a bad entry. */
+export function makePolicy(cfg: PolicyConfig): PolicyConfig {
+  const norm = (l: readonly string[]) => Object.freeze(l.map((p) => normalizePath(p)));
+  return Object.freeze({
+    readRoots: norm(cfg.readRoots),
+    writeRoots: norm(cfg.writeRoots),
+    neverRead: norm(cfg.neverRead),
+    neverWrite: norm(cfg.neverWrite),
+  });
+}
+
+function decide(status: StatusName, normalized?: string): PolicyDecision {
+  return normalized === undefined ? { status, code: Status[status] } : { status, code: Status[status], normalized };
+}
+
+/** `cfg` must come from makePolicy (or be pre-normalized). Order of checks follows the spec. */
+export function checkPolicy(cfg: PolicyConfig, mode: Mode, op: Operation, path: Uint8Array | string): PolicyDecision {
+  let normalized: string;
+  try {
+    normalized = normalizePath(path);
+  } catch (e) {
+    if (e instanceof PathInvalidError) return decide("PATH_INVALID");
+    throw e;
+  }
+  const write = op === "write";
+  if (write && mode === "READ_ONLY") return decide("FORBIDDEN_MODE");
+  const never = write ? cfg.neverWrite : cfg.neverRead;
+  if (never.some((n) => pathInside(normalized, n))) return decide("PROTECTED_PATH");
+  const roots = write ? cfg.writeRoots : cfg.readRoots;
+  if (!roots.some((r) => pathInside(normalized, r))) return decide("PROTECTED_PATH");
+  return decide("OK", normalized);
+}
