@@ -159,10 +159,14 @@ Erros: `OK, UNSUPPORTED_PROTOCOL, UNAUTHORIZED, FORBIDDEN_MODE, PROTECTED_PATH, 
 Abre `<destino>.ndp-<id>.tmp` no mesmo diretório → grava por chunk → `fflush`+`fsync` (se disponível) → confere tamanho e SHA-256 (se enviado) → se destino existe: `overwrite=never` ⇒ `EXISTS` (apaga o temp); `overwrite=replace` ⇒ (opcional `backup=true`: renomeia o antigo para `.bak`) → `rename` temp→destino. Falha em qualquer etapa remove o temp. Após desconexão no meio, o agent apaga temps órfãos ao aceitar a próxima conexão. Flow control: TCP + ACK a cada N chunks configurável (medir no hardware).
 
 ### 4.7 Paths e proteção
-Paths absolutos, `/`, UTF-8, relativos à raiz do SD; a normalização rejeita `..`, `\`, NUL, `//` e comprimento excessivo. Comparação **case-insensitive** (FAT). A política é aplicada **no device (autoritativa) e no Bridge (falha rápida)**. Áreas protegidas por padrão para escrita: `/Nintendo 3DS/` (saves/dados de título), `/luma/` (payloads/config — sobrescrever quebra o boot), `/boot.firm`, `/gm9/`, `/private/` e o próprio diretório do agent exceto `config/` e logs. Desbloqueio explícito por config e **nunca** por parâmetro de uma chamada de tool.
+Paths absolutos, `/`, UTF-8, relativos à raiz do SD; a normalização rejeita `..`, `\`, NUL, `//` e comprimento excessivo. Comparação **case-insensitive** (FAT). A política é aplicada **no device (autoritativa) e no Bridge (falha rápida)**. **Modelo de escrita: allowlist (nega por padrão), não blocklist.**
+- **Leitura:** o SD inteiro, exceto o arquivo de config/chaves do próprio agent.
+- **Escrita:** somente dentro de *pastas permitidas* (`write_roots`). Padrão: **apenas** `/3ds/nintendo-dev-agent/` (com `inbox/` para uploads). Para `deploy_homebrew` em `/3ds/tmc3ds/`, o usuário adiciona essa pasta **no console ou no arquivo de config do SD** — nunca por parâmetro de tool nem por comando remoto.
+- **Nunca permitido, mesmo que um `write_root` o contenha:** `/Nintendo 3DS/` (saves/dados de título), `/luma/` (payloads/config — sobrescrever pode impedir o boot), `/boot.firm`, `/gm9/`, `/private/` e o arquivo de chaves do agent. Camada extra de defesa contra config errada.
+- Com `READ_ONLY` nenhuma escrita é aceita, em nenhuma pasta.
 
 ## 5. Segurança
-- Modos: `READ_ONLY` (padrão) → `DEVELOPMENT` → `FULL` (reservado). Trocar modo só pelo console (botão) ou config no SD — nunca por comando remoto.
+- Modos: `READ_ONLY` (padrão; nenhuma escrita) → `DEVELOPMENT` (escrita só em `write_roots`, padrão = pasta do agent) → `FULL` (reservado). Trocar modo só pelo console (botão) ou config no SD — nunca por comando remoto.
 - Não aceitar conexão sem pairing; limite de 1 conexão; timeouts em todo estágio; contagem de falhas de AUTH com backoff.
 - Prompt injection: logs, dumps e arquivos do SD entram no contexto do LLM como **dados**; as descrições das tools dizem isso, e o Bridge marca saídas de arquivo como conteúdo não confiável.
 - Toda ação vai para o **audit log** do Bridge (quem, o quê, path, resultado, hash).
