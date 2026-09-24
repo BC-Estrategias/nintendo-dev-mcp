@@ -132,13 +132,14 @@ Conclusão para o roadmap: o **loop de desenvolvimento completo** (deploy → ex
 - Tools: `inputSchema` (JSON Schema 2020-12), `outputSchema` opcional, `structuredContent`, `isError` para erros de execução vs. erros JSON-RPC para protocolo, `annotations` **não confiáveis**. Tipos de conteúdo: text, image, audio, `resource_link`, recurso embutido.
 - Extensão **Tasks** (operações longas assíncronas com polling) — candidata para `deploy`/`benchmark`.
 - Servidores "devem" validar entradas, aplicar controle de acesso, limitar taxa, sanitizar saídas; clientes "devem" pedir confirmação e ter humano no loop.
-- SDK: `@modelcontextprotocol/server` **2.1.0** (novo) e `@modelcontextprotocol/sdk` **1.30.1** (linha anterior). **Pendência:** confirmar se Codex 0.134 e Claude Code 2.1.177 já falam a spec 2026-07-28 ou se ainda dependem do handshake antigo — define qual SDK/modo usar. Testar com um servidor "hello" antes de decidir.
+- SDK: `@modelcontextprotocol/server` **2.1.0** (novo) e `@modelcontextprotocol/sdk` **1.30.1** (linha anterior).
+- **Verificado (2026-09-24, `tests/mcp-hello`):** Claude Code 2.1.177 abre com `initialize` **2025-11-25**; Codex 0.134.0 com `initialize` **2025-06-18**. Nenhum fala 2026-07-28. `serveStdio(factory)` do SDK v2 (`@modelcontextprotocol/server/stdio`) atende as duas eras (padrão `'serve'` para aberturas 2025), e um servidor hello respondeu corretamente a ambos os handshakes em teste roteirizado. **Decisão: usar o SDK v2.** A chamada de tool feita pelo modelo nos clientes reais não foi exercitada (falhas de autenticação/versão do modelo no ambiente de teste).
 
 ## 6. Não verificado / pendências
 1. Emulador (Azahar/Citra) com sockets de host para rodar o agente sem hardware — pesquisa web não confirmou; testar.
 2. `makerom` instalado? (só necessário para CIA/CXI, não para 3dsx).
 3. Pasta exata dos dumps do Luma (`/dumps/` vs `/luma/dumps/`).
-4. Codex/Claude Code vs. spec MCP 2026-07-28.
+4. ~~Codex/Claude Code vs. spec MCP 2026-07-28~~ — resolvido: ambos usam a era `initialize`; SDK v2 atende. Falta um teste ponta a ponta com o modelo chamando a tool.
 5. Throughput real de SD e Wi-Fi no seu New 3DS (chunk 16 vs 64 KiB).
 6. Custo de SHA-256 em software no ARM11 (New 3DS com speedup ligado).
 7. Consumo de memória e efeito do NDM exclusivo num agente residente.

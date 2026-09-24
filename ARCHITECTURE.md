@@ -190,7 +190,7 @@ Nomes com underscore (`nintendo_fs_read`). Descrições explicitam: hardware rea
 
 O chunking do fio (32–64 KiB) é independente do que o LLM enxerga.
 
-**Versão MCP:** a spec mais recente é **2026-07-28** (sem `initialize`, requisições autocontidas; stdio + Streamable HTTP). SDK novo: `@modelcontextprotocol/server` 2.1.0. **Antes de decidir**, um servidor "hello" precisa ser testado contra Codex 0.134 e Claude Code 2.1.177 para saber se já falam essa revisão; senão usar o SDK 1.x ou o modo de compatibilidade.
+**Versão MCP (verificado):** a spec mais recente é **2026-07-28**, mas Claude Code 2.1.177 e Codex 0.134.0 ainda abrem com `initialize` (2025-11-25 e 2025-06-18). **Decisão:** `@modelcontextprotocol/server` 2.1.0 com `serveStdio(factory)`, que atende as duas eras (evidência em `tests/mcp-hello`). Em HTTP local (app desktop) a mesma compatibilidade dual precisa ser testada no marco M9.
 
 ## 7. Estrutura do repositório
 
@@ -267,7 +267,7 @@ GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imag
 Regra de depuração (do prompt): erro → identificar a camada → adicionar diagnóstico → hipótese → testar → corrigir; sem mudanças aleatórias. "Concluído" só quando validado no hardware, não porque compila.
 
 ## 15. Riscos e questões em aberto
-1. Confirmar qual revisão MCP Codex/Claude Code falam (define SDK).
+1. Teste ponta a ponta (modelo chamando a tool) nos clientes reais; compatibilidade dual também em HTTP local.
 2. Pasta exata dos dumps do Luma; endereço-base para `addr2line`.
 3. Chunk ideal (16 vs 64 KiB) e throughput real — medir.
 4. Custo de SHA-256 no ARM11 — medir; fallback: Bridge relê e compara.

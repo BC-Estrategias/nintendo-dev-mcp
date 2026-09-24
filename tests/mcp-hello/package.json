@@ -1,0 +1,10 @@
+{
+  "name": "mcp-hello",
+  "private": true,
+  "type": "module",
+  "description": "Testes de compatibilidade MCP (sonda + servidor hello) — não faz parte do produto",
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.1.0",
+    "zod": "^4.6.5"
+  }
+}
