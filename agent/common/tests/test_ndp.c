@@ -5,6 +5,7 @@
 
 #include "ndp/ndp_agent.h"
 #include "ndp/ndp_frame.h"
+#include "ndp/ndp_names.h"
 #include "ndp/ndp_path.h"
 #include "ndp/ndp_policy.h"
 #include "ndp/ndp_sha256.h"
@@ -157,6 +158,16 @@ static void test_frame_errors(void) {
   }
 }
 
+static void test_names(void) {
+  CHECK(strcmp(ndp_command_name(NDP_CMD_HELLO), "HELLO") == 0 && strcmp(ndp_command_name(NDP_CMD_PING), "PING") == 0,
+        "command names");
+  CHECK(strcmp(ndp_command_name(0x7777), "?") == 0, "unknown command name");
+  CHECK(strcmp(ndp_status_name(NDP_OK), "OK") == 0 && strcmp(ndp_status_name(NDP_ST_PATH_INVALID), "PATH_INVALID") == 0 &&
+            strcmp(ndp_status_name(NDP_ST_HELLO_REQUIRED), "HELLO_REQUIRED") == 0,
+        "status names");
+  CHECK(strcmp(ndp_status_name(999), "UNKNOWN") == 0, "unknown status name");
+}
+
 static void test_tlv(void) {
   uint8_t b[64];
   ndp_tlv_w w;
@@ -282,6 +293,7 @@ int main(void) {
   test_frames();
   test_macs();
   test_frame_errors();
+  test_names();
   test_tlv();
   test_paths();
   test_policy();

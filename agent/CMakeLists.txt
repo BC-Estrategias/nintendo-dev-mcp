@@ -14,6 +14,7 @@ if(NDP_SANITIZE)
 endif()
 
 add_subdirectory(common)
+add_subdirectory(posix)
 add_subdirectory(host)
 
 enable_testing()

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Full local verification: vectors are up to date, C builds (-Werror, ASan/UBSan) and passes,
 # TypeScript typechecks and passes (including integration against the C host agent).
+# Pass --3ds to also build the console agent (needs devkitPro).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -19,5 +20,10 @@ cmake --build build/agent
 
 echo "==> TypeScript bridge"
 (cd bridge && npm install --no-audit --no-fund >/dev/null && npx tsc -p tsconfig.json --noEmit && npm test)
+
+if [ "${1:-}" = "--3ds" ]; then
+  echo "==> 3DS build"
+  ./scripts/build-3ds.sh
+fi
 
 echo "==> all checks passed"

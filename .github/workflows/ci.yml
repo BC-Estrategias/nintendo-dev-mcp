@@ -1,0 +1,57 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  host:
+    name: host (C core + TypeScript) on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Full check (vectors, C build + tests, tsc, TS tests)
+        run: ./scripts/check.sh
+
+  typescript-windows:
+    name: TypeScript on Windows (no C host agent)
+    runs-on: windows-latest
+    env:
+      NDP_SKIP_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --no-audit --no-fund
+        working-directory: bridge
+      - run: npx tsc -p tsconfig.json --noEmit
+        working-directory: bridge
+      - run: npm test
+        working-directory: bridge
+
+  agent-3ds:
+    name: 3DS agent (.3dsx)
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install 3DS toolchain packages
+        run: dkp-pacman -Syu --noconfirm 3ds-dev
+      - name: Build
+        run: make -C agent/3ds
+      - name: Checksums
+        run: |
+          mkdir -p dist
+          cp agent/3ds/nintendo-dev-agent.3dsx agent/3ds/nintendo-dev-agent.smdh dist/
+          cd dist && sha256sum nintendo-dev-agent.3dsx nintendo-dev-agent.smdh | tee SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nintendo-dev-agent-3ds
+          path: dist/

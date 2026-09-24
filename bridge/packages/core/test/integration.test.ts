@@ -14,7 +14,12 @@ const AGENT =
   process.env.NDP_HOST_AGENT ??
   fileURLToPath(new URL("../../../../build/agent/host/ndp-host-agent", import.meta.url));
 
-if (!existsSync(AGENT)) {
+// Set NDP_SKIP_INTEGRATION=1 where the C host agent is not built (e.g. Windows CI).
+const SKIP = Boolean(process.env.NDP_SKIP_INTEGRATION);
+const suite = SKIP ? describe.skip : describe;
+const it = SKIP ? test.skip : test;
+
+if (!SKIP && !existsSync(AGENT)) {
   throw new Error(
     `host agent not found at ${AGENT}\nBuild it first:  cmake -S agent -B build/agent && cmake --build build/agent\n` +
       `(or set NDP_HOST_AGENT=/path/to/ndp-host-agent)`,
@@ -38,11 +43,13 @@ function startAgent(args: string[] = []): Promise<{ proc: ChildProcess; port: nu
   });
 }
 
-describe("host agent over TCP", () => {
+suite("host agent over TCP", () => {
   let proc: ChildProcess;
   let port: number;
-  before(async () => ({ proc, port } = await startAgent()));
-  after(() => proc.kill());
+  before(async () => {
+    if (!SKIP) ({ proc, port } = await startAgent());
+  });
+  after(() => proc?.kill());
 
   test("HELLO then PING", async () => {
     const c = await NdpClient.connect({ host: "127.0.0.1", port });
@@ -120,6 +127,36 @@ describe("host agent over TCP", () => {
     }
   });
 
+  test("a new connection replaces the previous client (no lock-out by a stale connection)", async () => {
+    const a = await NdpClient.connect({ host: "127.0.0.1", port });
+    await a.hello();
+    const b = await NdpClient.connect({ host: "127.0.0.1", port });
+    try {
+      await b.hello();
+      await b.ping();
+      await assert.rejects(a.ping(), NdpTransportError);
+    } finally {
+      a.close();
+      b.close();
+    }
+  });
+
+  test("a client that vanishes mid-frame does not break the agent", async () => {
+    const sock = connect({ host: "127.0.0.1", port });
+    await new Promise<void>((r) => sock.once("connect", () => r()));
+    sock.write(encodeFrame({ kind: Kind.REQ, requestId: 1, command: Command.PING }).subarray(0, 11)); // half a header
+    await new Promise((r) => setTimeout(r, 50));
+    sock.destroy();
+    await new Promise((r) => setTimeout(r, 50));
+    const c = await NdpClient.connect({ host: "127.0.0.1", port });
+    try {
+      await c.hello();
+      await c.ping();
+    } finally {
+      c.close();
+    }
+  });
+
   test("a frame split into single bytes still works", async () => {
     const sock = connect({ host: "127.0.0.1", port });
     await new Promise<void>((r) => sock.once("connect", () => r()));
@@ -143,11 +180,27 @@ describe("host agent over TCP", () => {
   });
 });
 
-test("connecting to a closed port fails with a clear error", async () => {
+it("idle clients are dropped after the idle timeout", async () => {
+  const { proc, port } = await startAgent(["--idle-ms", "300"]);
+  try {
+    const a = await NdpClient.connect({ host: "127.0.0.1", port });
+    await a.hello();
+    await new Promise((r) => setTimeout(r, 900));
+    await assert.rejects(a.ping(), NdpTransportError);
+    a.close();
+    const b = await NdpClient.connect({ host: "127.0.0.1", port });
+    await b.hello();
+    b.close();
+  } finally {
+    proc.kill();
+  }
+});
+
+it("connecting to a closed port fails with a clear error", async () => {
   await assert.rejects(NdpClient.connect({ host: "127.0.0.1", port: 1, connectTimeoutMs: 1000 }), NdpTransportError);
 });
 
-test("request times out when the agent never answers", async () => {
+it("request times out when the agent never answers", async () => {
   const { createServer } = await import("node:net");
   const silent = createServer(() => {});
   await new Promise<void>((r) => silent.listen(0, "127.0.0.1", () => r()));

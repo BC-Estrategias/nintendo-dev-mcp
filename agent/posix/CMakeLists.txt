@@ -1,0 +1,3 @@
+add_library(ndp_posix_server STATIC src/ndp_server.c)
+target_include_directories(ndp_posix_server PUBLIC include)
+target_link_libraries(ndp_posix_server PUBLIC ndp_common)

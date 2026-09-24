@@ -1,0 +1,300 @@
+/* Nintendo Dev Agent — 3DS entry point.
+ * Wi-Fi/soc bring-up, the UI, and the main loop. Protocol handling and connection management live in
+ * the shared code (agent/common, agent/posix). Network start-up follows the sequence proven by ftpd:
+ * acInit -> ACU_GetWifiStatus -> memalign(0x1000, 1 MiB) -> socInit -> NDM exclusive+lock. */
+#include <3ds.h>
+
+#include <arpa/inet.h>
+#include <malloc.h>
+#include <netinet/in.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "alog.h"
+#include "ndp/ndp_server.h"
+
+#define AGENT_PORT NDP_DEFAULT_PORT
+#define SOC_ALIGN 0x1000
+#define SOC_BUFSIZE 0x100000
+
+#define C_RESET "\x1b[0m"
+#define C_GREEN "\x1b[32;1m"
+#define C_YELLOW "\x1b[33;1m"
+#define C_RED "\x1b[31;1m"
+#define C_CYAN "\x1b[36;1m"
+
+static PrintConsole g_top, g_bot;
+static ndp_server g_srv; /* ~135 KB of buffers inside: static, not on the stack */
+
+static u32 *g_soc_buf = NULL;
+static bool g_soc_up = false, g_ndm_locked = false, g_ps_ok = false;
+static bool g_wifi = false, g_listening = false;
+static in_addr_t g_ip = 0;
+static char g_err[64] = "";
+static uint64_t g_next_soc_try = 0, g_next_listen_try = 0, g_last_check = 0;
+static Result g_last_acu = 0;
+static bool g_first_check = true;
+static uint64_t g_start_ms = 0;
+
+static uint64_t now_ms(void *ctx) {
+  (void)ctx;
+  return svcGetSystemTick() / (SYSCLOCK_ARM11 / 1000);
+}
+
+static void srv_log(void *ctx, const char *line) {
+  (void)ctx;
+  alog("%s", line);
+}
+
+static void random_bytes(void *ctx, uint8_t *out, size_t n) {
+  static uint32_t x = 0;
+  static bool warned = false;
+  size_t i;
+  (void)ctx;
+  if (g_ps_ok && R_SUCCEEDED(PS_GenerateRandomBytes(out, n))) return;
+  if (!warned) { alog("WARN: PS random unavailable, weak nonce"); warned = true; }
+  if (!x) x = (uint32_t)svcGetSystemTick() | 1u;
+  for (i = 0; i < n; i++) {
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    out[i] = (uint8_t)x;
+  }
+}
+
+static void set_err(const char *fmt, unsigned long v) { snprintf(g_err, sizeof g_err, fmt, v); }
+
+static bool start_soc(uint64_t now) {
+  Result r;
+  if (now < g_next_soc_try) return false;
+  if (!g_soc_buf) g_soc_buf = (u32 *)memalign(SOC_ALIGN, SOC_BUFSIZE);
+  if (!g_soc_buf) {
+    alog("ERROR: cannot allocate soc buffer");
+    snprintf(g_err, sizeof g_err, "no memory for soc buffer");
+    g_next_soc_try = now + 5000;
+    return false;
+  }
+  r = socInit(g_soc_buf, SOC_BUFSIZE);
+  if (R_FAILED(r)) {
+    alog("ERROR: socInit 0x%08lX", (unsigned long)r);
+    set_err("socInit failed 0x%08lX", (unsigned long)r);
+    free(g_soc_buf);
+    g_soc_buf = NULL;
+    g_next_soc_try = now + 3000;
+    return false;
+  }
+  g_soc_up = true;
+  aptSetSleepAllowed(false);
+  r = NDMU_EnterExclusiveState(NDM_EXCLUSIVE_STATE_INFRASTRUCTURE);
+  if (R_FAILED(r)) {
+    alog("WARN: NDM exclusive state 0x%08lX", (unsigned long)r);
+  } else {
+    r = NDMU_LockState();
+    if (R_FAILED(r)) {
+      alog("WARN: NDM lock 0x%08lX", (unsigned long)r);
+      NDMU_LeaveExclusiveState();
+    } else {
+      g_ndm_locked = true;
+    }
+  }
+  alog("Network services ready");
+  return true;
+}
+
+static void stop_listening(void) {
+  ndp_server_close(&g_srv);
+  g_listening = false;
+}
+
+static bool ip_usable(in_addr_t ip) { return ip != 0 && ip != (in_addr_t)0xFFFFFFFFu; }
+
+/* Every 500 ms: Wi-Fi state, soc, IP, (re)listen. Returns true when something visible changed. */
+static bool service_network(uint64_t now) {
+  bool changed = false, up;
+  u32 st = 0;
+  Result r;
+  if (!g_first_check && now - g_last_check < 500) return false;
+  g_first_check = false;
+  g_last_check = now;
+
+  r = ACU_GetWifiStatus(&st);
+  if (r != g_last_acu) { alog("ACU_GetWifiStatus result 0x%08lX", (unsigned long)r); g_last_acu = r; }
+  up = R_SUCCEEDED(r) && st != 0;
+  if (up != g_wifi) {
+    g_wifi = up;
+    changed = true;
+    if (up) alog("Wi-Fi connected (status %lu)", (unsigned long)st);
+    else {
+      alog("Wi-Fi lost");
+      stop_listening();
+      g_ip = 0;
+    }
+  }
+  if (!up) return changed;
+
+  if (!g_soc_up && !start_soc(now)) return true;
+
+  {
+    in_addr_t ip = (in_addr_t)gethostid();
+    if (!ip_usable(ip)) {
+      if (g_listening) { alog("IP address lost"); stop_listening(); changed = true; }
+      g_ip = 0;
+      snprintf(g_err, sizeof g_err, "waiting for an IP address");
+      return changed;
+    }
+    if (!g_listening || ip != g_ip) {
+      int rc;
+      if (now < g_next_listen_try) return changed;
+      if (g_listening) alog("IP changed, re-listening");
+      stop_listening();
+      rc = ndp_server_listen(&g_srv, ip, AGENT_PORT);
+      changed = true;
+      if (rc == 0) {
+        struct in_addr ia;
+        ia.s_addr = ip;
+        g_listening = true;
+        g_ip = ip;
+        g_err[0] = '\0';
+        alog("Listening on %s:%u", inet_ntoa(ia), (unsigned)g_srv.port);
+      } else {
+        alog("ERROR: listen failed (%d: %s)", rc, strerror(-rc));
+        snprintf(g_err, sizeof g_err, "listen failed: %s", strerror(-rc));
+        g_next_listen_try = now + 2000;
+      }
+    }
+  }
+  return changed;
+}
+
+static void hms(char *out, size_t cap, uint64_t ms) {
+  unsigned long s = (unsigned long)(ms / 1000);
+  snprintf(out, cap, "%02lu:%02lu:%02lu", s / 3600, (s / 60) % 60, s % 60);
+}
+
+static void draw(uint64_t now) {
+  char up[16];
+  int n, i, shown;
+  const char *color, *status;
+
+  if (g_listening) { color = C_GREEN; status = "ONLINE"; }
+  else if (!g_wifi) { color = C_YELLOW; status = "WAITING FOR Wi-Fi"; }
+  else if (g_err[0]) { color = C_RED; status = "NETWORK ERROR"; }
+  else { color = C_YELLOW; status = "STARTING NETWORK"; }
+
+  consoleSelect(&g_top);
+  consoleClear();
+  printf(C_CYAN "Nintendo Dev Agent" C_RESET "   v%s\n", NDP_AGENT_VERSION);
+  printf("Protocol %d\n\n", NDP_PROTOCOL_VERSION);
+  printf("Status : %s%s" C_RESET "\n", color, status);
+  if (g_listening) {
+    struct in_addr ia;
+    ia.s_addr = g_ip;
+    printf("IP     : %s\n", inet_ntoa(ia));
+    printf("Port   : %u\n", (unsigned)g_srv.port);
+  } else {
+    printf("IP     : -\nPort   : %u\n", (unsigned)AGENT_PORT);
+  }
+  if (g_srv.client_fd >= 0) printf("Bridge : " C_GREEN "CONNECTED" C_RESET " %s\n", g_srv.peer);
+  else printf("Bridge : not connected\n");
+  printf("Mode   : %s\n", ndp_mode_name(g_srv.agent_cfg.mode));
+  hms(up, sizeof up, now - g_start_ms);
+  printf("Uptime : %s   Requests: %lu\n", up, (unsigned long)g_srv.requests);
+  if (g_err[0]) printf("\n" C_RED "%s" C_RESET "\n", g_err);
+  printf("\n\nSTART = Exit\n");
+
+  consoleSelect(&g_bot);
+  consoleClear();
+  printf(C_CYAN "Recent activity" C_RESET "\n\n");
+  shown = 27;
+  for (n = 0; n < shown && alog_get(n); n++) {}
+  for (i = n - 1; i >= 0; i--) printf("%.39s\n", alog_get(i));
+
+  gfxFlushBuffers();
+  gfxSwapBuffers();
+  gspWaitForVBlank();
+}
+
+int main(void) {
+  ndp_agent_config cfg;
+  ndp_server_platform plat;
+  uint64_t last_draw = 0;
+  bool is_new3ds = false;
+  Result r;
+
+  osSetSpeedupEnable(true);
+  gfxInitDefault();
+  consoleInit(GFX_TOP, &g_top);
+  consoleInit(GFX_BOTTOM, &g_bot);
+  alog_init();
+  g_start_ms = now_ms(NULL);
+
+  alog("Nintendo Dev Agent v%s, protocol %d", NDP_AGENT_VERSION, NDP_PROTOCOL_VERSION);
+  if (R_SUCCEEDED(APT_CheckNew3DS(&is_new3ds))) alog("Console: %s", is_new3ds ? "New 3DS family" : "Old 3DS family");
+  r = acInit();
+  alog("acInit: 0x%08lX", (unsigned long)r);
+  r = psInit();
+  g_ps_ok = R_SUCCEEDED(r);
+  alog("psInit: 0x%08lX", (unsigned long)r);
+  r = ndmuInit();
+  alog("ndmuInit: 0x%08lX", (unsigned long)r);
+
+  memset(&cfg, 0, sizeof cfg);
+  cfg.platform = "3ds";
+  cfg.agent_version = NDP_AGENT_VERSION;
+  cfg.mode = NDP_MODE_READ_ONLY;
+  cfg.auth = "none";
+  cfg.max_frame = NDP_DEFAULT_MAX_FRAME;
+  cfg.random_bytes = random_bytes;
+  memset(&plat, 0, sizeof plat);
+  plat.now_ms = now_ms;
+  plat.log = srv_log;
+  ndp_server_init(&g_srv, &plat, &cfg);
+
+  draw(now_ms(NULL));
+  while (aptMainLoop()) {
+    uint64_t now;
+    bool changed;
+    hidScanInput();
+    if (hidKeysDown() & KEY_START) break;
+
+    now = now_ms(NULL);
+    changed = service_network(now);
+    if (g_listening) {
+      int s = ndp_server_step(&g_srv, 16);
+      if (s < 0) {
+        alog("Listener lost; will re-listen");
+        stop_listening();
+        g_ip = 0;
+        g_next_listen_try = now + 1000;
+        changed = true;
+      } else if (s > 0) {
+        changed = true;
+      }
+    } else {
+      svcSleepThread(16 * 1000000LL);
+    }
+
+    now = now_ms(NULL);
+    if (changed || alog_dirty() || now - last_draw >= 1000) {
+      alog_clear_dirty();
+      draw(now);
+      last_draw = now;
+    }
+  }
+
+  alog("Exiting");
+  ndp_server_close(&g_srv);
+  if (g_ndm_locked) {
+    NDMU_UnlockState();
+    NDMU_LeaveExclusiveState();
+  }
+  aptSetSleepAllowed(true);
+  if (g_soc_up) socExit();
+  free(g_soc_buf);
+  if (g_ps_ok) psExit();
+  ndmuExit();
+  acExit();
+  alog_exit();
+  gfxExit();
+  return 0;
+}
