@@ -252,7 +252,7 @@ GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imag
 
 | Marco | Entrega | Prova em hardware |
 |---|---|---|
-| **M0** | Repo, docs, protocolo escrito, vetores de teste, codec TS + `common` C com testes, host agent | nenhuma (tudo no Mac) |
+| **M0** ✔ | Repo, docs, protocolo escrito ([`docs/protocol/ndp-v1.md`](docs/protocol/ndp-v1.md)), vetores independentes (Python), codec TS + `common` C com testes, host agent, CLI `ndev` | nenhuma (tudo no Mac): `scripts/check.sh` |
 | **M1** *(Etapa C)* | Agent 3DS: Wi-Fi, mostra IP, abre porta, aceita conexão, HELLO+PING. `ndev ping <ip>` | Mac: `ndev ping` → PONG |
 | **M2** *(D)* | `DEVICE_INFO` | `ndev info` mostra modelo, IP, SD, memória |
 | **M3** *(E)* | `FS_LIST`, `FS_STAT` | `ndev ls /3ds` |
