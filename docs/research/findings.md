@@ -82,7 +82,7 @@ Não há suíte de testes (o próprio `AGENTS.md` do repo diz isso).
 FTP em si; C++20/STL/GSL/ImGui/curl/jansson (pesados demais para DSi e desnecessários); credenciais em texto puro; escrita direta no destino; mDNS próprio (599 linhas — ver discovery); código sob GPL (ver licença).
 
 ### Licença
-ftpd e sys-ftpd são **GPL-3.0**. Copiar código deles obriga o nosso projeto a ser GPL-3.0-compatível. Decisão: **escrever nossa própria camada**, usando o ftpd só como referência de comportamento/hardware. Nosso código: MIT ou Apache-2.0 (a decidir). libctru é zlib, compatível. Se um dia copiarmos qualquer trecho, isso precisa ser uma decisão explícita e documentada.
+ftpd e sys-ftpd são **GPL-3.0**. Copiar código deles obriga o nosso projeto a ser GPL-3.0-compatível. Decisão: **escrever nossa própria camada**, usando o ftpd só como referência de comportamento/hardware. Nosso código: Apache-2.0 (decidido). libctru é zlib, compatível. Se um dia copiarmos qualquer trecho, isso precisa ser uma decisão explícita e documentada.
 
 ## 2. sys-ftpd — como virou serviço residente no 3DS
 

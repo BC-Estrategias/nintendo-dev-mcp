@@ -197,7 +197,7 @@ O chunking do fio (32–64 KiB) é independente do que o LLM enxerga.
 ```
 nintendo-dev-mcp/
 ├─ ARCHITECTURE.md
-├─ README.md   LICENSE (MIT ou Apache-2.0 — decidir)   CHANGELOG.md
+├─ README.md   LICENSE (Apache-2.0)   NOTICE   CHANGELOG.md
 ├─ docs/
 │  ├─ research/findings.md          # Etapa A
 │  ├─ protocol/ndp-v1.md            # spec canônica + tabela de erros
