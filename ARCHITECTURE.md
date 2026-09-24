@@ -4,7 +4,9 @@ Status: **proposta para revisão**. Nenhum código de produto escrito ainda. Fat
 
 ## 1. Objetivo
 
-Transformar um Nintendo 3DS com CFW num **target remoto de desenvolvimento** controlável por agentes de IA (Codex, Claude Code…) via MCP. O 3DS expõe hardware/filesystem por um protocolo leve; um **Bridge** no computador (ou servidor) fala esse protocolo e vira servidor MCP. Nenhum LLM roda no console.
+Transformar um Nintendo 3DS com CFW num **target remoto de desenvolvimento** controlável por agentes de IA (Codex, Claude Code…) via MCP. O 3DS expõe hardware/filesystem por um protocolo leve; um **Bridge** no seu computador (Mac/Windows/Linux, mesma LAN do console) fala esse protocolo e vira servidor MCP. Nenhum LLM roda no console.
+
+O projeto também deve poder ser **distribuído a outras pessoas** (ver §13): instalação simples em Mac/Windows/Linux, padrões seguros e nada específico da máquina do autor.
 
 Princípios: incremental e provado em hardware; protocolo neutro de plataforma (3DS → DSi → Switch); agente do console simples e sem dependências pesadas; segurança desde o primeiro commit (isto é escrita remota no SD).
 
@@ -14,8 +16,7 @@ Princípios: incremental e provado em hardware; protocolo neutro de plataforma (
 ┌──────────────────────────────────────────────────────────────────┐
 │ Clientes                                                         │
 │  Codex / Claude Code (MCP stdio ou HTTP local)                   │
-│  ChatGPT / Claude web (MCP HTTP remoto, fase futura)             │
-│  Você (UI desktop tipo FileZilla / UI web, fase futura)          │
+│  Você (app desktop tipo FileZilla, fase futura)                  │
 └───────────────┬──────────────────────────────────────────────────┘
                 │
 ┌───────────────▼──────────────────────────────────────────────────┐
@@ -26,7 +27,7 @@ Princípios: incremental e provado em hardware; protocolo neutro de plataforma (
 │  ├ mcp-http (localhost)    ├ Policy: modos, paths, confirmações  │
 │  ├ cli (`ndev`)            ├ Audit log (toda ação)               │
 │  ├ desktop UI  (depois)    ├ Codec do protocolo NDP + transporte │
-│  └ web UI      (depois)    └ Adaptadores de plataforma           │
+│                            └ Adaptadores de plataforma           │
 │                              (paths conhecidos, crashes, info)   │
 └───────────────┬──────────────────────────────────────────────────┘
                 │ NDP v1 sobre TCP (LAN), autenticado por HMAC
@@ -39,11 +40,11 @@ Princípios: incremental e provado em hardware; protocolo neutro de plataforma (
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Cenário remoto (servidor web) — resposta à ideia do frontend hospedado
-O servidor (Hetzner) **não alcança** o 3DS (NAT) e o 3DS não faz TLS de forma razoável. Solução: o **Bridge roda como daemon local** (Mac/PC/Pi na sua LAN) e abre **conexão de saída** TLS/WebSocket até o servidor; a UI web e o MCP remoto ficam no servidor e falam com o daemon por esse túnel. O 3DS continua só falando TCP+HMAC na LAN. Regras: nada de porta aberta na sua rede; o servidor nunca vê a chave de pairing do console; modo padrão READ ONLY quando via internet.
+### Tudo local, sem servidor (decisão)
+O Bridge roda **na mesma máquina/LAN do console** (Mac, Windows ou Linux). Não há servidor hospedado, túnel nem exposição na internet: o 3DS só fala TCP+HMAC na LAN com o Bridge, e os clientes MCP (Codex, Claude Code) falam com o Bridge localmente. Isso reduz a superfície de ataque (nenhuma porta aberta para fora, nenhum TLS a portar) e a complexidade. Consequência aceita: clientes que exigem MCP remoto (ChatGPT/Claude web) **não** conseguem usar o Bridge. Se um dia isso for necessário, o núcleo continua reutilizável (ver §15), mas está fora do escopo.
 
 ### App desktop (ideia "FileZilla + servidor MCP")
-Boa ideia e compatível: **uma UI, dois hospedeiros**. A UI (React) é a mesma na versão web (servidor) e na versão desktop (janela que embute o daemon local). Vantagens: navegador de arquivos do SD com drag-and-drop, **log de auditoria em tempo real do que a IA está fazendo**, botão de trocar modo (READ ONLY/DEVELOPMENT), aprovação humana de escritas, pairing guiado. Notas: (a) MCP stdio precisa que o cliente lance o processo — então o app desktop expõe MCP por **HTTP em 127.0.0.1** (Streamable HTTP) e/ou fornece um pequeno `ndev mcp-stdio` que só repassa ao app em execução; (b) empacotar: começar com "daemon Node + UI aberta no navegador em localhost" (zero empacotamento) e só depois embrulhar em Tauri/Electron; (c) **não é MVP** — entra depois do marco M6.
+O app é o próprio Bridge com interface: um **daemon local + UI** que conecta ao 3DS e, ao mesmo tempo, **é o servidor MCP**. Vantagens: navegador de arquivos do SD com drag-and-drop, **log de auditoria em tempo real do que a IA está fazendo**, botão de trocar modo (READ ONLY/DEVELOPMENT), aprovação humana de escritas, pairing guiado. Notas: (a) MCP stdio exige que o cliente lance o processo; um app já aberto expõe MCP por **HTTP em 127.0.0.1** (Streamable HTTP, apenas loopback) e/ou oferece `ndev mcp-stdio`, um pequeno repassador para o app em execução; (b) empacotamento: começar com "daemon Node + UI no navegador em localhost" e só depois embrulhar em Tauri/Electron (Mac e Windows); (c) **não é MVP** — entra depois do marco M6. Até lá, o Bridge é só CLI + servidor MCP stdio.
 
 ## 3. Componentes
 
@@ -64,7 +65,7 @@ Monorepo TypeScript:
 | `platform-3ds` | Paths conhecidos (`/3ds`, dumps do Luma…), parser de crash dump, mapeamento de modelo |
 | `mcp` | Servidor MCP (stdio + HTTP) com as tools |
 | `cli` | `ndev ping|info|ls|cat|put|pair` — também é a ferramenta de teste manual |
-| `apps/desktop`, `apps/web` | Fase futura |
+| `apps/desktop` | Fase futura (UI + daemon local) |
 
 ```ts
 interface NintendoDevice {
@@ -203,7 +204,7 @@ nintendo-dev-mcp/
 │  ├─ dsi/  switch/                          # README de intenção apenas
 ├─ bridge/
 │  ├─ packages/{core,platform-3ds,mcp,cli}/
-│  └─ apps/{desktop,web}/                    # futuro
+│  └─ apps/desktop/                          # futuro
 ├─ tests/
 │  ├─ integration/   # bridge ⇄ agent/host
 │  └─ hardware/      # roteiros manuais + scripts de diagnóstico
@@ -220,7 +221,7 @@ Aproveitar (conhecimento): ordem de init de rede do 3DS; sockets não-bloqueante
 Não copiar: FTP; C++20/STL/GSL/ImGui/curl/jansson; credencial em texto; escrita direta no destino; código GPL-3.0 (ver licença em `findings.md`); mDNS próprio.
 
 ## 10. Discovery
-MVP: IP manual. Depois: **beacon UDP** (Bridge faz broadcast de "NDP-DISCOVER", agent responde com nome/modelo/porta) — muito mais simples que mDNS no libctru (o mDNS do ftpd tem ~600 linhas). Sem descoberta automática no MVP.
+MVP: IP manual. Para uso por outras pessoas, a descoberta automática **sobe de prioridade** (entra antes do primeiro release público). Formato: **beacon UDP** (Bridge faz broadcast de "NDP-DISCOVER", agent responde com nome/modelo/porta) — muito mais simples que mDNS no libctru (o mDNS do ftpd tem ~600 linhas). Sem descoberta automática no MVP.
 
 ## 11. Background (residente) — visão de roadmap
 Não implementar agora. Requisitos e riscos em `findings.md §2`. Pré-requisito real do loop "deploy → executar → coletar log": um agente que sobreviva ao lançamento do app testado. Duas rotas: sysmodule Luma (estilo sys-ftpd) ou app sob teste com biblioteca cliente que loga ao Mac.
@@ -230,6 +231,16 @@ Luma grava `crash_dump_NNNNNNNN.dmp` em `…/dumps/arm11/` **somente se o usuár
 
 ## 13. CI/CD
 GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imagem `devkitpro/devkitarm`) gerando `.3dsx` + `.smdh`; (3) release com `.3dsx`, Bridge, `SHA256SUMS`, changelog. CIA avaliado separadamente. O remoto GitHub será criado por você (o token local não cria repositórios).
+
+### Distribuição para outras pessoas
+- **Licença:** como não copiamos código GPL do ftpd, podemos escolher MIT ou Apache-2.0 (decisão pendente). Precisa estar definida **antes** de qualquer release público. Dependências de terceiros e a atribuição delas entram em `THIRD_PARTY_LICENSES`.
+- **Artefatos por release:** `nintendo-dev-agent.3dsx` (+ `.smdh`) para o console; Bridge/app desktop para macOS (Apple Silicon e Intel), Windows e Linux; `SHA256SUMS`; changelog. Assinatura/notarização no macOS e no Windows é trabalho à parte (custo e conta de desenvolvedor) — sem isso o usuário verá avisos do sistema. CIA fica para depois.
+- **Nada específico da sua máquina:** sem IPs, caminhos ou nomes fixos no código; configuração por usuário (`~/.config/nintendo-dev/` ou equivalente), auditoria e chaves de pairing locais.
+- **Seguro por padrão:** primeira execução em `READ_ONLY`; pairing obrigatório; caminhos protegidos ativos. Outras pessoas terão saves e CFW próprios — o custo de um bug destrutivo sobe. Isso torna a escrita atômica, os backups e o `fs.delete` só via lixeira requisitos, não extras.
+- **Compatibilidade entre versões:** o handshake com `protocol_version` e mensagem clara de "atualize o agent/Bridge" passa a ser requisito de produto, pois agent e Bridge terão ciclos de atualização independentes.
+- **Ambientes variados:** Windows precisa entrar no CI cedo (paths, firewall na primeira escuta, terminador de linha); redes com isolamento de clientes (AP isolation) e redes 2.4 GHz-only devem estar na documentação de solução de problemas.
+- **Documentação de usuário:** guia "instalar em 5 minutos" (copiar `.3dsx`, instalar o app, parear), checklist de diagnóstico, aviso claro de que exige CFW (Luma3DS) e que o uso é por conta e risco do usuário. Não distribuímos firmware, chaves nem conteúdo da Nintendo.
+- **Sem telemetria.**
 
 ## 14. Roadmap e marcos (cada marco termina com um teste **no seu New 3DS**)
 
@@ -244,7 +255,7 @@ GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imag
 | **M6** | Servidor MCP (stdio) com as 6 tools + logs de auditoria | **Teste de aceitação do prompt**: Codex lê `test.txt` e cria `from-codex.txt` |
 | M7 | `fs_upload/download`, `deploy_homebrew` (hash, backup, temp→rename; estudar `3dslink` antes) | build `.3dsx` do TMC3DS enviado e substituído |
 | M8 | Logs e crashes (+ parser Luma) | "analise o último crash" |
-| M9 | UI desktop/web + túnel remoto | UI mostra a IA agindo |
+| M9 | App desktop (UI + MCP em 127.0.0.1) | UI mostra a IA agindo |
 | M10+ | Agente residente; CIA install (com confirmação); benchmark; DSi; Switch | — |
 
 Regra de depuração (do prompt): erro → identificar a camada → adicionar diagnóstico → hipótese → testar → corrigir; sem mudanças aleatórias. "Concluído" só quando validado no hardware, não porque compila.
@@ -258,3 +269,6 @@ Regra de depuração (do prompt): erro → identificar a camada → adicionar di
 6. Modelo de chave: PSK em texto no SD; canal sem criptografia — decidir se aceitável no MVP.
 7. Licença do nosso código (MIT vs Apache-2.0).
 8. Agente residente: efeito do NDM exclusivo em jogos e uso real de memória.
+9. Escolha da licença (bloqueia o release público) e do nome do projeto (evitar marcas da Nintendo no nome/ícone distribuídos).
+10. Assinatura/notarização dos apps desktop (macOS/Windows) e custo associado.
+11. MCP remoto (ChatGPT/Claude web) está **fora do escopo** por decisão; se voltar a ser desejado, exigiria um túnel de saída a partir do Bridge local e reavaliação de segurança.
