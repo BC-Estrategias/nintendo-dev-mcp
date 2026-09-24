@@ -159,15 +159,17 @@ Erros: `OK, UNSUPPORTED_PROTOCOL, UNAUTHORIZED, FORBIDDEN_MODE, PROTECTED_PATH, 
 Abre `<destino>.ndp-<id>.tmp` no mesmo diretório → grava por chunk → `fflush`+`fsync` (se disponível) → confere tamanho e SHA-256 (se enviado) → se destino existe: `overwrite=never` ⇒ `EXISTS` (apaga o temp); `overwrite=replace` ⇒ (opcional `backup=true`: renomeia o antigo para `.bak`) → `rename` temp→destino. Falha em qualquer etapa remove o temp. Após desconexão no meio, o agent apaga temps órfãos ao aceitar a próxima conexão. Flow control: TCP + ACK a cada N chunks configurável (medir no hardware).
 
 ### 4.7 Paths e proteção
-Paths absolutos, `/`, UTF-8, relativos à raiz do SD; a normalização rejeita `..`, `\`, NUL, `//` e comprimento excessivo. Comparação **case-insensitive** (FAT). A política é aplicada **no device (autoritativa) e no Bridge (falha rápida)**. **Modelo de escrita: allowlist (nega por padrão), não blocklist.**
-- **Leitura:** o SD inteiro, exceto o arquivo de config/chaves do próprio agent.
-- **Escrita:** somente dentro de *pastas permitidas* (`write_roots`). Padrão: **apenas** `/3ds/nintendo-dev-agent/` (com `inbox/` para uploads). Para `deploy_homebrew` em `/3ds/tmc3ds/`, o usuário adiciona essa pasta **no console ou no arquivo de config do SD** — nunca por parâmetro de tool nem por comando remoto.
-- **Nunca permitido, mesmo que um `write_root` o contenha:** `/Nintendo 3DS/` (saves/dados de título), `/luma/` (payloads/config — sobrescrever pode impedir o boot), `/boot.firm`, `/gm9/`, `/private/` e o arquivo de chaves do agent. Camada extra de defesa contra config errada.
+Paths absolutos, `/`, UTF-8, relativos à raiz do SD; a normalização rejeita `..`, `\`, NUL, `//` e comprimento excessivo. Comparação **case-insensitive** (FAT). A política é aplicada **no device (autoritativa) e no Bridge (falha rápida)**. **Modelo: allowlists escolhidas pelo usuário (nega por padrão).**
+- `read_roots` (padrão: SD inteiro) e `write_roots` (padrão: **apenas** `/3ds/nintendo-dev-agent/`). O usuário escolhe livremente quaisquer pastas (`/roms`, `/3ds/tmc3ds`, `/cias`…); a UI oferece presets, mas o projeto não impõe nomes nem estrutura.
+- A política é **guardada e aplicada no console**. A UI do Bridge pode *pedir* uma mudança, mas o console mostra uma **confirmação física** ("Permitir escrita em /roms? A/B"). Motivo: Codex/Claude Code têm shell na mesma máquina e poderiam chamar a API local da UI; um canal exclusivamente humano impede a IA de ampliar as próprias permissões. O arquivo de política e o de chaves não são graváveis remotamente.
+- **Pastas de alto risco** (`/Nintendo 3DS/`, `/luma/`, `/boot.firm`, `/gm9/`, `/private/`): fora do alcance mesmo que um root maior as contenha; liberar exige confirmação extra no console com aviso explícito.
 - Com `READ_ONLY` nenhuma escrita é aceita, em nenhuma pasta.
+- **Somente SD.** O agent monta apenas `sdmc:`. NAND (CTR/TWL NAND, saves de sistema) está **fora do escopo**: escrever pode brickar e ler expõe dados únicos do console a um LLM. Se um dia for desejado: raiz separada, somente leitura, modo `FULL` + confirmação no console.
 
 ## 5. Segurança
-- Modos: `READ_ONLY` (padrão; nenhuma escrita) → `DEVELOPMENT` (escrita só em `write_roots`, padrão = pasta do agent) → `FULL` (reservado). Trocar modo só pelo console (botão) ou config no SD — nunca por comando remoto.
+- Modos: `READ_ONLY` (padrão; nenhuma escrita) → `DEVELOPMENT` (escrita só em `write_roots`) → `FULL` (reservado). Trocar modo só pelo console (botão) ou config no SD — nunca por comando remoto.
 - Não aceitar conexão sem pairing; limite de 1 conexão; timeouts em todo estágio; contagem de falhas de AUTH com backoff.
+- **UI/API local:** escuta só em `127.0.0.1`; valida `Host` e `Origin` (defesa contra DNS rebinding e páginas maliciosas que chamem `localhost`); token por sessão; sem CORS aberto. Acesso de outros dispositivos da LAN (ex.: celular) só como opt-in explícito, com token.
 - Prompt injection: logs, dumps e arquivos do SD entram no contexto do LLM como **dados**; as descrições das tools dizem isso, e o Bridge marca saídas de arquivo como conteúdo não confiável.
 - Toda ação vai para o **audit log** do Bridge (quem, o quê, path, resultado, hash).
 - Tool annotations do MCP (`readOnlyHint`/`destructiveHint`) são úteis mas **não confiáveis**; a política real é a do Bridge/agent.
@@ -237,7 +239,7 @@ Luma grava `crash_dump_NNNNNNNN.dmp` em `…/dumps/arm11/` **somente se o usuár
 GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imagem `devkitpro/devkitarm`) gerando `.3dsx` + `.smdh`; (3) release com `.3dsx`, Bridge, `SHA256SUMS`, changelog. CIA avaliado separadamente. O remoto GitHub será criado por você (o token local não cria repositórios).
 
 ### Distribuição para outras pessoas
-- **Licença:** como não copiamos código GPL do ftpd, podemos escolher MIT ou Apache-2.0 (decisão pendente). Precisa estar definida **antes** de qualquer release público. Dependências de terceiros e a atribuição delas entram em `THIRD_PARTY_LICENSES`.
+- **Licença:** como não copiamos código GPL do ftpd, podemos escolher **Apache-2.0** (decidido; titular `BC Estratégias` em `NOTICE` — ajustar se necessário). Precisa estar definida **antes** de qualquer release público. Dependências de terceiros e a atribuição delas entram em `THIRD_PARTY_LICENSES`.
 - **Artefatos por release:** `nintendo-dev-agent.3dsx` (+ `.smdh`) para o console; Bridge/app desktop para macOS (Apple Silicon e Intel), Windows e Linux; `SHA256SUMS`; changelog. Assinatura/notarização no macOS e no Windows é trabalho à parte (custo e conta de desenvolvedor) — sem isso o usuário verá avisos do sistema. CIA fica para depois.
 - **Nada específico da sua máquina:** sem IPs, caminhos ou nomes fixos no código; configuração por usuário (`~/.config/nintendo-dev/` ou equivalente), auditoria e chaves de pairing locais.
 - **Seguro por padrão:** primeira execução em `READ_ONLY`; pairing obrigatório; caminhos protegidos ativos. Outras pessoas terão saves e CFW próprios — o custo de um bug destrutivo sobe. Isso torna a escrita atômica, os backups e o `fs.delete` só via lixeira requisitos, não extras.
@@ -271,8 +273,7 @@ Regra de depuração (do prompt): erro → identificar a camada → adicionar di
 4. Custo de SHA-256 no ARM11 — medir; fallback: Bridge relê e compara.
 5. Emulador (Azahar/Citra) rodando o agente com sockets do host — testar; reduziria muito o ciclo.
 6. Modelo de chave: PSK em texto no SD; canal sem criptografia — decidir se aceitável no MVP.
-7. Licença do nosso código (MIT vs Apache-2.0).
 8. Agente residente: efeito do NDM exclusivo em jogos e uso real de memória.
-9. Escolha da licença (bloqueia o release público) e do nome do projeto (evitar marcas da Nintendo no nome/ícone distribuídos).
+9. Nome público do projeto (evitar marcas da Nintendo no nome/ícone distribuídos).
 10. Assinatura/notarização dos apps desktop (macOS/Windows) e custo associado.
 11. MCP remoto (ChatGPT/Claude web) está **fora do escopo** por decisão; se voltar a ser desejado, exigiria um túnel de saída a partir do Bridge local e reavaliação de segurança.

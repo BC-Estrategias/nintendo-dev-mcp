@@ -6,3 +6,5 @@ Status: **fase de arquitetura** (nenhum código de produto ainda).
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — proposta de arquitetura, protocolo NDP v1, roadmap
 - [`docs/research/findings.md`](docs/research/findings.md) — pesquisa (ftpd, sys-ftpd, libctru, Luma3DS, MCP)
+
+Licença: [Apache-2.0](LICENSE).
