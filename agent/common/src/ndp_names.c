@@ -4,6 +4,9 @@ const char *ndp_command_name(uint16_t command) {
   switch (command) {
     case NDP_CMD_HELLO: return "HELLO";
     case NDP_CMD_PING: return "PING";
+    case NDP_CMD_FS_LIST: return "FS_LIST";
+    case NDP_CMD_FS_STAT: return "FS_STAT";
+    case NDP_CMD_FS_READ: return "FS_READ";
     default: return "?";
   }
 }

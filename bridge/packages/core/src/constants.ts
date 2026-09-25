@@ -12,7 +12,17 @@ export const Kind = { REQ: 1, RES: 2, DATA: 3, END: 4, ERR: 5, EVT: 6 } as const
 export const Flag = { MAC: 0x0001, MORE: 0x0002 } as const;
 export const FLAGS_KNOWN = Flag.MAC | Flag.MORE;
 
-export const Command = { HELLO: 0x0001, PING: 0x0002 } as const;
+export const Command = {
+  HELLO: 0x0001,
+  PING: 0x0002,
+  FS_LIST: 0x0020,
+  FS_STAT: 0x0021,
+  FS_READ: 0x0022,
+} as const;
+
+export const FsType = { FILE: 1, DIR: 2 } as const;
+export const DEFAULT_CHUNK = 32768;
+export const MIN_CHUNK = 512;
 
 export const Status = {
   OK: 0,
@@ -57,6 +67,21 @@ export const Tag = {
   SUPPORTED_MIN: 0x0019,
   SUPPORTED_MAX: 0x001a,
   PING_NONCE: 0x0020,
+  PATH: 0x0030,
+  CURSOR: 0x0031,
+  NEXT_CURSOR: 0x0032,
+  ENTRY: 0x0033,
+  TYPE: 0x0034,
+  SIZE: 0x0035,
+  MTIME: 0x0036,
+  OFFSET: 0x0037,
+  LENGTH: 0x0038,
+  CHUNK: 0x0039,
+  WANT_HASH: 0x003a,
+  SHA256: 0x003b,
+  TOTAL_SIZE: 0x003c,
+  WILL_SEND: 0x003d,
+  LIST_MORE: 0x003e,
 } as const;
 
 export type Mode = "READ_ONLY" | "DEVELOPMENT" | "FULL";

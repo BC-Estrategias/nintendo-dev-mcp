@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define NDP_AGENT_VERSION "0.1.2"
+#define NDP_AGENT_VERSION "0.2.0"
 #define NDP_PROTOCOL_VERSION 1
 #define NDP_HEADER_SIZE 20
 #define NDP_MAC_SIZE 16
@@ -25,7 +25,19 @@ enum ndp_kind {
 #define NDP_FLAG_MORE 0x0002u
 #define NDP_FLAGS_KNOWN (NDP_FLAG_MAC | NDP_FLAG_MORE)
 
-enum ndp_command { NDP_CMD_HELLO = 0x0001, NDP_CMD_PING = 0x0002 };
+enum ndp_command {
+  NDP_CMD_HELLO = 0x0001,
+  NDP_CMD_PING = 0x0002,
+  NDP_CMD_FS_LIST = 0x0020,
+  NDP_CMD_FS_STAT = 0x0021,
+  NDP_CMD_FS_READ = 0x0022
+};
+
+enum ndp_fs_type { NDP_TYPE_FILE = 1, NDP_TYPE_DIR = 2 };
+
+#define NDP_DEFAULT_CHUNK 32768u
+#define NDP_MIN_CHUNK 512u
+#define NDP_LIST_PAGE_MAX 100
 
 /* Status codes (spec §6). Functions in this library return these directly. */
 enum ndp_status {
@@ -64,7 +76,22 @@ enum ndp_tag {
   NDP_TAG_MAX_FRAME = 0x0018,
   NDP_TAG_SUPPORTED_MIN = 0x0019,
   NDP_TAG_SUPPORTED_MAX = 0x001A,
-  NDP_TAG_PING_NONCE = 0x0020
+  NDP_TAG_PING_NONCE = 0x0020,
+  NDP_TAG_PATH = 0x0030,
+  NDP_TAG_CURSOR = 0x0031,
+  NDP_TAG_NEXT_CURSOR = 0x0032,
+  NDP_TAG_ENTRY = 0x0033,
+  NDP_TAG_TYPE = 0x0034,
+  NDP_TAG_SIZE = 0x0035,
+  NDP_TAG_MTIME = 0x0036,
+  NDP_TAG_OFFSET = 0x0037,
+  NDP_TAG_LENGTH = 0x0038,
+  NDP_TAG_CHUNK = 0x0039,
+  NDP_TAG_WANT_HASH = 0x003A,
+  NDP_TAG_SHA256 = 0x003B,
+  NDP_TAG_TOTAL_SIZE = 0x003C,
+  NDP_TAG_WILL_SEND = 0x003D,
+  NDP_TAG_LIST_MORE = 0x003E
 };
 
 #endif

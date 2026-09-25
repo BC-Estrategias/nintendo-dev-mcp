@@ -52,7 +52,9 @@ mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16
 | 0x0001 | HELLO | ✔ | negocia protocolo, anuncia plataforma |
 | 0x0002 | PING | ✔ | eco de nonce |
 | 0x0010 | DEVICE_INFO | M2 | |
-| 0x0020–0x0022 | FS_LIST / FS_STAT / FS_READ | M3–M4 | |
+| 0x0020 | FS_LIST | M3 ✔ | lista um diretório (paginado) |
+| 0x0021 | FS_STAT | M3 ✔ | tipo, tamanho, mtime |
+| 0x0022 | FS_READ | M4 ✔ | lê arquivo em streaming |
 | 0x0030 | FS_WRITE | M5 | |
 | 0x0031/0x0032 | FS_MKDIR / FS_RENAME | pós-MVP | |
 | 0x0040+ | LOG_* / CRASH_* | fase 3 | |
@@ -101,15 +103,31 @@ ERR carrega, opcionalmente: `0x0001 detail` (str, texto humano curto, **informat
 | 0x0019 | supported_min | u16 | ERR de HELLO (`UNSUPPORTED_PROTOCOL`) |
 | 0x001A | supported_max | u16 | ERR de HELLO |
 | 0x0020 | ping_nonce | u64 | PING REQ e RES (eco) |
+| 0x0030 | path | str | FS_* REQ (path de protocolo, §10) |
+| 0x0031 | cursor | u32 | FS_LIST REQ: índice da primeira entrada desejada (0 = início) |
+| 0x0032 | next_cursor | u32 | FS_LIST RES: cursor da próxima página |
+| 0x0033 | entry | bytes | FS_LIST RES, **repetível**: `type u8 ‖ size u64 ‖ name utf-8` (ver §13) |
+| 0x0034 | type | u8 | FS_STAT RES: 1 = arquivo, 2 = diretório |
+| 0x0035 | size | u64 | FS_STAT RES: bytes |
+| 0x0036 | mtime | u64 | FS_STAT RES: segundos Unix UTC; **0 = desconhecido** |
+| 0x0037 | offset | u64 | FS_READ REQ (padrão 0) |
+| 0x0038 | length | u64 | FS_READ REQ (0 = até o fim do arquivo) |
+| 0x0039 | chunk | u32 | FS_READ REQ: tamanho de cada DATA (padrão 32 768; limitado a [512, max_frame]) |
+| 0x003A | want_hash | u8 | FS_READ REQ: 1 = agent calcula SHA-256 dos bytes enviados |
+| 0x003B | sha256 | bytes[32] | FS_READ END (só se want_hash = 1) |
+| 0x003C | total_size | u64 | FS_READ RES: tamanho total do arquivo |
+| 0x003D | will_send | u64 | FS_READ RES: bytes que virão em DATA |
+| 0x003E | list_more | u8 | FS_LIST RES: 1 = pode haver mais entradas (pedir `next_cursor`), 0 = fim |
 
 ## 8. Ordem de validação de um frame recebido pelo agent
 Depois que o decoder entrega um frame, o agent avalia **nesta ordem** e responde ao primeiro problema:
 1. `header.version ≠ 1` → ERR `UNSUPPORTED_PROTOCOL` (com `supported_min/max`);
 2. `kind ≠ REQ` → ERR `BAD_REQUEST`;
 3. payload não é uma sequência TLV bem formada (tamanho que ultrapassa o payload, ou resto < 4 bytes) → ERR `BAD_REQUEST`;
-4. `command = HELLO` → §9;
-5. sem HELLO prévio na conexão → ERR `HELLO_REQUIRED`;
-6. comando conhecido → seu tratamento; senão → ERR `UNSUPPORTED_COMMAND`.
+4. há uma transferência em curso nesta conexão → ERR `BUSY` (o REQ é descartado; a transferência continua);
+5. `command = HELLO` → §9;
+6. sem HELLO prévio na conexão → ERR `HELLO_REQUIRED`;
+7. comando conhecido → seu tratamento; senão → ERR `UNSUPPORTED_COMMAND` (inclui comandos FS quando o agent não tem filesystem).
 
 ## 9. Handshake e PING
 ```
@@ -148,3 +166,24 @@ Um root ou zona pode ser um arquivo (`/boot.firm`). A configuração só é alte
 
 ## 12. Fluxo de recepção (normativo para o decoder)
 Um decoder DEVE: acumular até 20 bytes; validar `magic`; ler `payload_len`; rejeitar `> max_frame` imediatamente; acumular `payload_len` (+16 se MAC); só então entregar o frame. Em erro de magic/flags a conexão é considerada desincronizada e DEVE ser fechada (não há ressincronização).
+
+## 13. Comandos de filesystem (somente leitura)
+Todos exigem HELLO prévio e passam pela política de leitura (§11) com o `path` normalizado. Falhas de política: `PATH_INVALID`, `PROTECTED_PATH`. Path ausente: `BAD_REQUEST`. Inexistente/inacessível como arquivo ou diretório: `NOT_FOUND`. Erro do SO: `IO_ERROR` (+ `os_result` quando houver).
+
+### FS_STAT
+`REQ {path}` → `RES {type, size, mtime}`. Só arquivos regulares e diretórios existem para o protocolo (links simbólicos e dispositivos são `NOT_FOUND`).
+
+### FS_LIST
+`REQ {path, cursor?}` → `RES {entry…, list_more, next_cursor}`.
+- `path` deve ser diretório (senão `BAD_REQUEST`). `.` e `..` nunca aparecem. Nomes com mais de 255 bytes UTF-8 são omitidos (não endereçáveis, §10).
+- Cada `entry` = `type u8 (1 arquivo, 2 diretório) ‖ size u64 ‖ name` (nome = o resto do valor, UTF-8, sem NUL). Ordem = a do diretório, estável entre páginas; o Bridge ordena se quiser.
+- Uma página traz no máximo 100 entradas. `list_more = 1` significa que o Bridge deve repetir com `cursor = next_cursor`; a última página pode vir vazia com `list_more = 0`. `cursor` além do fim → página vazia, `list_more = 0`.
+
+### FS_READ
+`REQ {path, offset?, length?, chunk?, want_hash?}`.
+1. Falhas de validação → `ERR` (nenhum dado é enviado): `offset > size` → `BAD_REQUEST`; diretório → `BAD_REQUEST`.
+2. Sucesso → `RES {total_size, will_send}` com `will_send = min(length ou ∞, size − offset)`.
+3. Depois, o agent envia **N frames `DATA`** (payload = bytes crus do arquivo, ≤ `chunk`; flag `MORE` em todos menos no último) e por fim um frame **`END`** (payload vazio, ou `{sha256}` se `want_hash = 1`). Todos repetem `request_id` e `command` da REQ. `will_send = 0` → RES seguido direto de END.
+4. Erro no meio (arquivo encolheu, erro de SD) → um frame `ERR` no lugar do `END`; o Bridge descarta o que recebeu.
+5. Durante a transferência o agent responde `BUSY` a qualquer REQ; se a conexão cair, a transferência é abortada e o arquivo fechado.
+6. `sha256` cobre exatamente os bytes enviados em DATA.

@@ -11,6 +11,9 @@ export function u16(v: number): Uint8Array {
   new DataView(b.buffer).setUint16(0, v, true);
   return b;
 }
+export function u8(v: number): Uint8Array {
+  return new Uint8Array([v]);
+}
 export function u32(v: number): Uint8Array {
   const b = new Uint8Array(4);
   new DataView(b.buffer).setUint32(0, v, true);
@@ -52,6 +55,13 @@ export class TlvMap {
   }
   first(tag: number): Uint8Array | undefined {
     return this.fields.find((f) => f.tag === tag)?.value;
+  }
+  u8(tag: number): number | undefined {
+    const v = this.first(tag);
+    return v && v.length === 1 ? (v[0] as number) : undefined;
+  }
+  all(tag: number): Uint8Array[] {
+    return this.fields.filter((f) => f.tag === tag).map((f) => f.value);
   }
   u16(tag: number): number | undefined {
     const v = this.first(tag);

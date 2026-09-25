@@ -1,47 +1,16 @@
 // Integration: TypeScript client <-> the C core running inside the host agent (real TCP).
 import { strict as assert } from "node:assert";
-import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { type ChildProcess } from "node:child_process";
 import { connect } from "node:net";
 import { after, before, describe, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { SKIP, startAgent } from "./helpers.ts";
 import {
   Command, DEFAULT_MAX_FRAME, Kind, NdpClient, NdpRemoteError, NdpTransportError, Status, Tag, encodeFrame,
   encodeTlv, isTransientConnectError,
 } from "../src/index.ts";
 
-const AGENT =
-  process.env.NDP_HOST_AGENT ??
-  fileURLToPath(new URL("../../../../build/agent/host/ndp-host-agent", import.meta.url));
-
-// Set NDP_SKIP_INTEGRATION=1 where the C host agent is not built (e.g. Windows CI).
-const SKIP = Boolean(process.env.NDP_SKIP_INTEGRATION);
 const suite = SKIP ? describe.skip : describe;
 const it = SKIP ? test.skip : test;
-
-if (!SKIP && !existsSync(AGENT)) {
-  throw new Error(
-    `host agent not found at ${AGENT}\nBuild it first:  cmake -S agent -B build/agent && cmake --build build/agent\n` +
-      `(or set NDP_HOST_AGENT=/path/to/ndp-host-agent)`,
-  );
-}
-
-function startAgent(args: string[] = []): Promise<{ proc: ChildProcess; port: number }> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(AGENT, ["--port", "0", ...args], { stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
-    const timer = setTimeout(() => reject(new Error("agent did not start")), 5000);
-    proc.stdout!.on("data", (d) => {
-      out += d;
-      const m = /LISTENING [\d.]+:(\d+)/.exec(out);
-      if (m) {
-        clearTimeout(timer);
-        resolve({ proc, port: Number(m[1]) });
-      }
-    });
-    proc.on("error", reject);
-  });
-}
 
 suite("host agent over TCP", () => {
   let proc: ChildProcess;
@@ -57,7 +26,7 @@ suite("host agent over TCP", () => {
       const info = await c.hello();
       assert.equal(info.protocol, 1);
       assert.equal(info.platform, "host");
-      assert.equal(info.agentVersion, "0.1.2");
+      assert.equal(info.agentVersion, "0.2.0");
       assert.equal(info.mode, "READ_ONLY");
       assert.equal(info.auth, "none");
       assert.equal(info.maxFrame, DEFAULT_MAX_FRAME);

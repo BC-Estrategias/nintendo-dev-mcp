@@ -1,6 +1,8 @@
 /* Host agent: the shared NDP server (agent/posix) on macOS/Linux, for Bridge integration tests and
  * development without a console.
- * Usage: ndp-host-agent [--bind ADDR] [--port N] [--mode READ_ONLY|DEVELOPMENT|FULL] [--once] [-v] */
+ * Usage: ndp-host-agent [--bind ADDR] [--port N] [--mode READ_ONLY|DEVELOPMENT|FULL] [--root DIR]
+ *                        [--idle-ms N] [--once] [-v]
+ * --root DIR serves DIR as the "SD card" (FS_LIST/FS_STAT/FS_READ); without it FS commands are unsupported. */
 #define _POSIX_C_SOURCE 200809L
 
 #include <arpa/inet.h>
@@ -12,6 +14,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "ndp/ndp_posix_fs.h"
 #include "ndp/ndp_server.h"
 
 static volatile sig_atomic_t g_stop = 0;
@@ -47,6 +50,7 @@ static void random_bytes(void *ctx, uint8_t *out, size_t n) {
 
 int main(int argc, char **argv) {
   const char *bind_addr = "127.0.0.1";
+  const char *root = NULL;
   int port = NDP_DEFAULT_PORT, once = 0, i, rc;
   unsigned idle_ms = 0;
   ndp_agent_config cfg;
@@ -54,6 +58,8 @@ int main(int argc, char **argv) {
   struct in_addr ia;
   struct sigaction act;
   static ndp_server srv; /* large buffers inside: keep off the stack */
+  static ndp_fs_ops fs_ops;
+  static ndp_posix_fs_ctx fs_ctx;
 
   memset(&cfg, 0, sizeof cfg);
   cfg.platform = "host";
@@ -66,6 +72,7 @@ int main(int argc, char **argv) {
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--bind") && i + 1 < argc) bind_addr = argv[++i];
     else if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--root") && i + 1 < argc) root = argv[++i];
     else if (!strcmp(argv[i], "--idle-ms") && i + 1 < argc) idle_ms = (unsigned)atoi(argv[++i]);
     else if (!strcmp(argv[i], "--mode") && i + 1 < argc) {
       const char *m = argv[++i];
@@ -76,7 +83,7 @@ int main(int argc, char **argv) {
     } else if (!strcmp(argv[i], "--once")) once = 1;
     else if (!strcmp(argv[i], "-v")) g_verbose = 1;
     else {
-      fprintf(stderr, "usage: %s [--bind ADDR] [--port N] [--mode M] [--idle-ms N] [--once] [-v]\n", argv[0]);
+      fprintf(stderr, "usage: %s [--bind ADDR] [--port N] [--mode M] [--root DIR] [--idle-ms N] [--once] [-v]\n", argv[0]);
       return 2;
     }
   }
@@ -88,6 +95,17 @@ int main(int argc, char **argv) {
   sigaction(SIGTERM, &act, NULL);
   signal(SIGPIPE, SIG_IGN);
 
+  if (root) {
+    size_t n = strlen(root);
+    char clean[256];
+    if (n >= sizeof clean) { fprintf(stderr, "--root too long\n"); return 2; }
+    memcpy(clean, root, n + 1);
+    while (n > 1 && clean[n - 1] == '/') clean[--n] = '\0'; /* the root must not end with '/' */
+    if (strcmp(clean, "/") == 0) clean[0] = '\0';
+    if (ndp_posix_fs_init(&fs_ops, &fs_ctx, clean) != 0) { fprintf(stderr, "--root too long\n"); return 2; }
+    cfg.fs = &fs_ops;
+  }
+
   memset(&plat, 0, sizeof plat);
   plat.now_ms = now_ms;
   plat.log = log_line;
@@ -96,7 +114,8 @@ int main(int argc, char **argv) {
 
   rc = ndp_server_listen(&srv, ia.s_addr, (uint16_t)port);
   if (rc < 0) { fprintf(stderr, "listen failed: %d\n", rc); return 1; }
-  printf("LISTENING %s:%u mode=%s\n", bind_addr, (unsigned)srv.port, ndp_mode_name(cfg.mode));
+  printf("LISTENING %s:%u mode=%s root=%s\n", bind_addr, (unsigned)srv.port, ndp_mode_name(cfg.mode),
+         root ? root : "(none)");
   fflush(stdout);
 
   while (!g_stop) {

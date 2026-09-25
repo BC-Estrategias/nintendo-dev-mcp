@@ -39,7 +39,21 @@ typedef struct {
   ndp_agent agent;
   ndp_decoder dec;
   uint8_t rbuf[NDP_HEADER_SIZE + NDP_DEFAULT_MAX_FRAME + NDP_MAC_SIZE];
+
+  /* Output queue: one frame at a time, sent without blocking (a 64 KiB DATA frame may need
+   * several send() calls). Stream frames are produced only when the previous one is fully out. */
   uint8_t out[NDP_HEADER_SIZE + NDP_DEFAULT_MAX_FRAME];
+  size_t out_len, out_off;
+
+  /* Input received but not yet decoded (a recv may carry several frames). */
+  uint8_t in[4096];
+  size_t in_len, in_pos;
+
+  /* Bookkeeping for the request currently being answered (for the [OK]/[ERR] log line). */
+  int cur_active;
+  uint32_t cur_id;
+  uint16_t cur_cmd;
+  uint64_t cur_t0;
 } ndp_server;
 
 void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_agent_config *cfg);
@@ -51,7 +65,8 @@ int ndp_server_listen(ndp_server *s, uint32_t s_addr, uint16_t port);
 /* Closes the client and the listener. Safe to call at any time. */
 void ndp_server_close(ndp_server *s);
 
-/* One iteration: waits up to timeout_ms for activity, then accepts/reads/answers/times out.
+/* One iteration: waits up to timeout_ms for activity, then accepts/reads/answers/streams/times out.
+ * Streaming is done in bounded slices (a few frames per call) so the platform loop stays responsive.
  * Returns 1 if something visible changed (connect, disconnect, request), 0 if not, or -1 when the
  * listener is broken and the caller should re-listen (typically after a network loss). */
 int ndp_server_step(ndp_server *s, int timeout_ms);

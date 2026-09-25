@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "alog.h"
+#include "ndp/ndp_posix_fs.h"
 #include "ndp/ndp_server.h"
 
 #define AGENT_PORT NDP_DEFAULT_PORT
@@ -35,6 +36,28 @@
 
 static PrintConsole g_top, g_bot;
 static ndp_server g_srv; /* ~135 KB of buffers inside: static, not on the stack */
+
+/* Filesystem: the SD card ("sdmc:"), read-only. Requests that touch the agent's own folder flush the
+ * buffered log first, so `ndev cat .../agent.log` shows the current log and not the last flush. */
+static ndp_posix_fs_ctx g_fs_ctx;
+static ndp_fs_ops g_fs_base, g_fs;
+
+static void flush_if_own_folder(const char *path) {
+  static const char own[] = "/3ds/nintendo-dev-agent";
+  if (strncmp(path, own, sizeof own - 1) == 0) alog_flush();
+}
+static int fs_stat(void *ctx, const char *path, ndp_fs_stat *st) {
+  flush_if_own_folder(path);
+  return g_fs_base.stat(ctx, path, st);
+}
+static int fs_dir_open(void *ctx, const char *path, void **dir) {
+  flush_if_own_folder(path);
+  return g_fs_base.dir_open(ctx, path, dir);
+}
+static int fs_file_open(void *ctx, const char *path, void **file) {
+  flush_if_own_folder(path);
+  return g_fs_base.file_open(ctx, path, file);
+}
 
 static u32 *g_soc_buf = NULL;
 static bool g_soc_up = false, g_ndm_locked = false, g_ps_ok = false;
@@ -277,6 +300,13 @@ int main(void) {
   cfg.auth = "none";
   cfg.max_frame = NDP_DEFAULT_MAX_FRAME;
   cfg.random_bytes = random_bytes;
+  if (ndp_posix_fs_init(&g_fs_base, &g_fs_ctx, "sdmc:") == 0) {
+    g_fs = g_fs_base;
+    g_fs.stat = fs_stat;
+    g_fs.dir_open = fs_dir_open;
+    g_fs.file_open = fs_file_open;
+    cfg.fs = &g_fs; /* default policy: read everything except the agent's config; no writes */
+  }
   memset(&plat, 0, sizeof plat);
   plat.now_ms = now_ms;
   plat.log = srv_log;
