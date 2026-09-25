@@ -24,6 +24,19 @@ namespace CTRPluginFramework
     static Handle g_soc = 0, g_mem = 0;
     static std::string g_report;
 
+    /* Diagnostic trail on the SD card: tells "the plugin ran" from "the plugin never loaded", whatever the OSD or
+     * the network do. Read it later with `ndev cat`. */
+    static void LogLine(const std::string &line)
+    {
+        File f;
+        if (File::Open(f, "/3ds/nintendo-dev-agent/spike-plugin.log", File::WRITE | File::CREATE | File::APPEND | File::SYNC) == 0)
+        {
+            std::string l = line + "\n";
+            f.Write(l.data(), (u32)l.size());
+            f.Close();
+        }
+    }
+
     static inline u32 CurProcessId(void) { return 0x20; } /* IPC "process id" translate descriptor */
 
     static void Step(const char *name, s32 value)
@@ -32,6 +45,7 @@ namespace CTRPluginFramework
         snprintf(line, sizeof line, "%s = 0x%08lX", name, (unsigned long)value);
         g_report += line;
         g_report += "\n";
+        LogLine(line);
         OSD::Notify(line, value < 0 ? Color::Red : Color::Lime);
     }
 
@@ -120,6 +134,7 @@ namespace CTRPluginFramework
         snprintf(title, sizeof title, "ndev spike in title %016llX", (unsigned long long)Process::GetTitleID());
         g_report += title;
         g_report += "\n";
+        LogLine(title);
         OSD::Notify(title);
 
         s32 r;
@@ -159,11 +174,15 @@ namespace CTRPluginFramework
         RunNetTest();
     }
 
-    void PatchProcess(FwkSettings &settings) { (void)settings; }
+    void PatchProcess(FwkSettings &settings)
+    {
+        settings.WaitTimeToBoot = Seconds(2);
+    }
     void OnProcessExit(void) {}
 
     int main(void)
     {
+        LogLine("main() reached");
         PluginMenu *menu = new PluginMenu("ndev spike", 0, 0, 1, "Network test for the Nintendo Dev MCP.");
         menu->SynchronizeWithFrame(true);
         menu->Append(new MenuEntry("Network test (soc:U)", nullptr, NetTestMenu, "Connects to the computer and sends the step results."));
