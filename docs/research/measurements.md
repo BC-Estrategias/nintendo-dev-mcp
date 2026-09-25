@@ -52,7 +52,19 @@ Fonte: `agent.log` copiado do cartão SD pelo usuário. Sessões: v0.1.0 (21:09�
 3. 12 linhas `[CLOSE] replaced by a new connection` seguidas às 21:24:10–11: são as reconexões rápidas do teste (o novo connect chega antes de o agente processar o FIN do anterior). Inofensivo.
 4. Início/fim limpos nas 3 sessões (`Exiting` + `agent exit`): sair com START e reabrir funciona, e a porta 6464 volta.
 
+## 2026-09-24 — v0.1.2 (log do SD em buffer): hipótese confirmada
+
+Versão confirmada pelo próprio agente (`ndev hello` → `v0.1.2`).
+
+| Teste | v0.1.1 | v0.1.2 |
+|---|---|---|
+| 30 pings em sequência | 17,5–18,3 ms | **4,3 ms** (mín 1,8 / máx 33,8) |
+| 30 pings, `-i 100` | 14,4–16,8 ms | **2,9 ms** (1,9 / 7,6) |
+| 300 pings em sequência | 18,2 ms | **3,7 ms** (1,6 / 54,2) |
+| 15 pings, `-i 300` | 85,7–92 ms | 85,7 ms (5,1 / 111,8) — economia de energia do rádio, inalterada |
+
+**Conclusão (confirmada por medição):** o `fflush` por linha no cartão SD custava ~13–14 ms por requisição (~75% do RTT) e causava o pico de ~400 ms. Com o log em buffer, o RTT de rede "quente" é ~2–4 ms. Os picos restantes (30–55 ms, raros) são compatíveis com o redesenho (≤4×/s, ~20 ms) e com o flush periódico; não investigados.
+
 ## Pendências de medição
-- Reavaliar `[OK] ms` e RTT com a v0.1.2 (log bufferizado).
 - Vazão de leitura/escrita do SD e de rede (chunk 16 vs 64 KiB) — M4/M5.
 - Custo de SHA-256 no ARM11.
