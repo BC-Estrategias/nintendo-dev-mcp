@@ -1,0 +1,16 @@
+{
+  "name": "@ndev/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": { "ndev-mcp": "./src/main.ts" },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.1.0",
+    "@ndev/core": "*",
+    "zod": "^4.0.0"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\""
+  }
+}

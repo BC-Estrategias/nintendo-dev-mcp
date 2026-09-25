@@ -258,7 +258,7 @@ GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imag
 | **M3** ✔ | `FS_LIST`, `FS_STAT` | validado no New 3DS (`ndev ls`) |
 | **M4** ✔ | `FS_READ` em streaming | `cat test.txt` = "Hello from Nintendo 3DS" no 3DS real; ~1 MiB/s |
 | **M5** ◐ | `FS_WRITE` atômico + `FS_MKDIR` + modos + proteção de paths ✔ (v0.3.0, testes no Mac); **pareamento/HMAC ⏳** | `from-codex.txt` no SD real (a testar) |
-| **M6** | Servidor MCP (stdio) com as 6 tools + logs de auditoria | **Teste de aceitação do prompt**: Codex lê `test.txt` e cria `from-codex.txt` |
+| **M6** ✔ | Servidor MCP (stdio) com 12 ferramentas, descoberta automática, auditoria e sandbox local ([`docs/mcp.md`](docs/mcp.md)) | 13 testes ponta a ponta no Mac; **pendente:** teste com modelo real e com o console real |
 | M7 | `fs_upload/download`, `deploy_homebrew` (hash, backup, temp→rename; estudar `3dslink` antes) | build `.3dsx` do TMC3DS enviado e substituído |
 | M8 | Logs e crashes (+ parser Luma) | "analise o último crash" |
 | M9 | App desktop (UI + MCP em 127.0.0.1) | UI mostra a IA agindo |

@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { createWriteStream } from "node:fs";
 import { once } from "node:events";
-import { DEFAULT_PORT, NdpClient, NdpRemoteError, NdpTransportError, PathInvalidError } from "@ndev/core";
+import { DEFAULT_PORT, NdpClient, NdpRemoteError, NdpTransportError, PathInvalidError, discover } from "@ndev/core";
 
 const USAGE = `ndev — Nintendo Dev Bridge (CLI)
 
 Usage:
+  ndev find [port]                                scan this computer's subnets for a console running the agent
+                                                  (the console's IP changes: DHCP)
   ndev hello <host[:port]>                        connect and print the agent's HELLO
   ndev ping  <host[:port]> [-c N] [-i MS]         HELLO + N pings (default 4), MS ms between pings
   ndev ls    <host[:port]> <path>                 list a directory on the device's SD card
@@ -78,6 +80,15 @@ async function withClient<T>(target: string, fn: (c: NdpClient, host: string, po
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, target, ...rest] = argv;
+  if (cmd === "find") {
+    const found = await discover(target ? { port: Number(target) } : {});
+    if (found.length === 0) {
+      console.error("no agent found. Open the Nintendo Dev Agent app on the console (same Wi-Fi as this computer).");
+      return 1;
+    }
+    for (const f of found) console.log(`${f.host}:${f.port}  ${f.agent.platform} agent v${f.agent.agentVersion}  mode ${f.agent.mode}`);
+    return 0;
+  }
   if (!cmd || cmd === "-h" || cmd === "--help") {
     console.log(USAGE);
     return cmd ? 0 : 2;

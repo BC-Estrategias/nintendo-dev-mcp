@@ -166,6 +166,11 @@ export class NdpClient {
     return this.#info;
   }
 
+  /** True once the connection failed or was closed (e.g. the agent dropped it after its idle timeout). */
+  get isClosed(): boolean {
+    return this.#failure !== null || this.#socket.destroyed;
+  }
+
   close(): void {
     this.#socket.destroy();
   }

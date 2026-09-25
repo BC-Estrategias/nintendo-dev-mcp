@@ -2,7 +2,7 @@
 
 Torna um Nintendo 3DS com CFW um target remoto de desenvolvimento controlável por agentes de IA (Codex, Claude Code) via MCP. Arquitetura pensada para expandir a DSi e Switch.
 
-**Status:** M0 concluído (protocolo + núcleo testado no Mac, sem console). Próximo: M1 — agente 3DS com `PING` (primeiro teste no hardware).
+**Status:** M0–M6 concluídos (agente 3DS com leitura/escrita/lixeira, CLI `ndev` e **servidor MCP**). Validado no New 3DS: ping, listagem, leitura, escrita, delete. O servidor MCP foi testado ponta a ponta contra o agente de teste; **ainda não com um modelo real nem com o console real** (ver `docs/mcp.md`).
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — arquitetura, segurança, roadmap
 - [`docs/protocol/ndp-v1.md`](docs/protocol/ndp-v1.md) — especificação do protocolo NDP v1
@@ -12,7 +12,7 @@ Torna um Nintendo 3DS com CFW um target remoto de desenvolvimento controlável p
 ```
 agent/common/   núcleo C99 sem dependências de SO (frames, TLV, paths, política, SHA/HMAC, HELLO/PING)
 agent/host/     agente de teste para macOS/Linux (mesmo núcleo atrás de sockets POSIX)
-bridge/         TypeScript: @ndev/core (codec, política, cliente TCP) e @ndev/cli (`ndev`)
+bridge/         TypeScript: @ndev/core (codec, cliente TCP, descoberta), @ndev/cli (`ndev`) e @ndev/mcp (servidor MCP)
 docs/protocol/  especificação + vetores de teste (gerados por uma implementação Python independente)
 tests/mcp-hello Compatibilidade MCP com Codex/Claude Code
 ```
