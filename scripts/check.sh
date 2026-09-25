@@ -13,6 +13,9 @@ if [ -d .git ] && ! git diff --quiet -- docs/protocol/test-vectors agent/common/
   exit 1
 fi
 
+echo "==> web page up to date?"
+python3 scripts/build-web.py --check
+
 echo "==> C core + host agent"
 cmake -S agent -B build/agent -DCMAKE_BUILD_TYPE=Debug >/dev/null
 cmake --build build/agent
