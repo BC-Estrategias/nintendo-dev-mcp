@@ -3,7 +3,9 @@ Author: Nintendo Dev MCP
 Version: # Plugin version
     Major: 0
     Minor: 0
-    Revision: 3
+    Revision: 4
+
+AllowHomebrewLoad: true # the game is a libctru homebrew CIA: Luma skips such games silently otherwise
 
 Targets: # Low TitleId of games which are compatibles with this plugin (0 for all)
     - 0x05A22D00
