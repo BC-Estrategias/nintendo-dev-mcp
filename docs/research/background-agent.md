@@ -25,6 +25,23 @@ Método: leitura do código do Luma3DS (master de 2026-09-02, commit `aef3130`),
    - **Plugin 3GX** roda dentro de um jogo/app específico, não é "sempre ligado".
    - O agente atual (primeiro plano) continua servindo para operações de arquivo no SD.
 
-## Objetivo real do usuário (esclarecido depois) e caminho preferido
-O que se quer é **ler logs em tempo real com o jogo aberto**, sem sair dele para abrir o agente. O jogo de interesse é o **TMC3DS** (`/Users/macmini/zelda-tmc-3ds`, `BC-Estrategias/zelda-tmc-3ds`), **projeto do próprio usuário**, que já usa rede dentro do jogo (RetroAchievements/atualizador: `socInit` com buffer de 1 MiB) e grava `tmc3ds.log` (`platform/3ds/source/platform_3ds.c`).
-Caminho preferido: **embutir o agente no próprio jogo** (biblioteca C que já existe: `agent/common` + `agent/posix`), numa **thread própria**, só em builds de desenvolvimento (flag de compilação; nunca ligado nos releases públicos). Etapas: (1) servir o SD → `ndev cat …/tmc3ds.log --tail` com o jogo rodando; (2) empurrar linhas de log ao vivo por frames `EVT` (tipo já reservado no protocolo) → `ndev logs` / MCP; (3) crash/estado. Pontos a resolver: único `socInit` compartilhado com RA/atualizador; thread/núcleo (Old 3DS tem só o syscore limitado); chamadas de FS bloqueantes (~16 ms `stat`, ~6 s `mkdir`) fora da thread do jogo; RAM (~170 KB, reduzível). Para jogos comerciais isso não se aplica (só o GDB do Rosalina).
+## Objetivo real do usuário e caminhos (o projeto é GERAL, não de um jogo)
+O que se quer é **acessar logs/arquivos em tempo real com um jogo aberto**, sem sair dele para abrir o agente. O projeto é para **qualquer jogo/homebrew**; o TMC3DS (`/Users/macmini/zelda-tmc-3ds`, projeto do próprio usuário, que já usa rede e grava `tmc3ds.log`) é só **um** exemplo. Três "hospedeiros" do mesmo núcleo de agente (`agent/common` + `agent/posix`):
+
+| Hospedeiro | Serve para | Estado |
+|---|---|---|
+| **App em primeiro plano** (hoje) | operações de arquivo no SD, deploy | funcionando |
+| **Biblioteca embutida** (`libndev`) | homebrew que o desenvolvedor controla (logs ao vivo por frames `EVT`, SD, crash) | não iniciado |
+| **Plugin 3GX do Luma**, ligado **por jogo** no front-end | **qualquer jogo**, sem alterá-lo | não iniciado; viabilidade parcial |
+
+### Plugin 3GX por jogo — o que se verificou no código do Luma (não testado no console)
+- O loader procura `/luma/plugins/<TitleID de 16 hex>/*.3gx` e cai em `/luma/plugins/default.3gx` (`sysmodules/rosalina/source/plugin/file_loader.c:14-15`). **Ligar/desligar por jogo = colocar/remover o `.3gx` na pasta daquele título** — exatamente o modelo "o usuário escolhe no front-end".
+- `plugin_loader_enabled = 1` já está ativo no Luma do usuário.
+- O plugin recebe um bloco de memória de **5 MiB** (`memoryblock.c:12`, ajustável no cabeçalho 3GX): sobra para o agente (~250 KB).
+- Rede dentro de um jogo qualquer: o jogo costuma **não** ter acesso ao `soc:U`. O Luma tem a SVC customizada `svcControlService(SERVICEOP_STEAL_CLIENT_SESSION, …, "soc:U")` (`csvc.h`) que permite obter a sessão, e o próprio Rosalina usa rede (`minisoc.c`, stub GDB). **Que um plugin consiga abrir sockets em jogos arbitrários é a grande incógnita — precisa de um teste.**
+- Limites conhecidos/prováveis: só vale para o jogo **lançado depois** de ligar o plugin; compatibilidade varia por título (memória, crash); homebrew via HBL usa o título `hbldr_3dsx_titleid` (`000400000d921e00` na config do usuário), então um plugin nessa pasta valeria para **todo** 3DSX.
+- Ferramental: `3gxtool`/CTRPluginFramework **não estão** nos repositórios do devkitPro (busca vazia) — teriam que ser obtidos/compilados do GitHub.
+- Front-end: `/luma` é `never_write` para a rede. Ligar/desligar exige **destravar só `/luma/plugins/`** com confirmação no console (a "zona de risco" já prevista) e usar `FS_WRITE`/`FS_DELETE`. Listar os jogos instalados exige um comando novo (`AM_GetTitleList`).
+
+## O que NÃO se aplica
+Sysmodule residente (ver acima) e, para jogos comerciais, "logs" no sentido de arquivo de log — eles não têm; o que se ganha é acesso ao SD/estado enquanto o jogo roda.
