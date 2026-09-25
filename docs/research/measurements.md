@@ -32,12 +32,27 @@ Conexão "a frio" (20 s parado; CLI completo, incluindo início do Node): 368–
 | 30 pings em sequência (`-i 0`) | **17,5 ms** médio (mín 11,2 / máx 45,5) — antes: 34,6 ms |
 | 30 pings, `-i 100` | 16,8 ms (10,0 / 45,1) |
 | 15 pings, `-i 300` | 92,0 ms (15,1 / 111,4) — economia de energia do rádio, sem mudança |
-| 500 pings em sequência | 0 falhas, médio 19,2 ms (mín 9,9 / **máx 408,7**) — um pico isolado de ~400 ms, não investigado (retransmissão Wi-Fi?) |
+| 500 pings em sequência | 0 falhas, médio 19,2 ms (mín 9,9 / **máx 408,7**) — um pico isolado de ~400 ms — **ver análise do agent.log abaixo: foi dentro do agente, não no Wi-Fi** |
 | Nova conexão substitui a anterior | ok: a conexão A recebe `ECONNRESET`, B segue funcionando |
 | 20 reconexões seguidas (connect+hello+ping+close) | 20/20 ok, 57 ms cada |
 
 **Conclusão:** a correção do redesenho reduziu ~17 ms por requisição em sequência (confirmado). O agente ficou estável em 500 requisições e em reconexões rápidas.
 
+## 2026-09-24 — análise do `agent.log` do SD (3 sessões, 781 requisições)
+
+Fonte: `agent.log` copiado do cartão SD pelo usuário. Sessões: v0.1.0 (21:09–21:20), v0.1.1 (21:23–21:47), v0.1.1 (21:48–21:50).
+
+**Correções a conclusões anteriores (feitas por mim, refutadas pelo log):**
+- ~~"Depois do HOME o agente perde o listener e se recupera"~~ → **falso.** O `ECONNREFUSED` observado ocorreu porque o app estava **fechado** (`Exiting` 21:47:54, novo `agent start` 21:48:08). Não há nenhum `Wi-Fi lost` nas 3 sessões. Efeito do HOME em si: **sem evidência** (o app suspenso não escreve log).
+- ~~"Pico de ~408 ms foi retransmissão do Wi-Fi"~~ → **falso.** O agente registrou `[OK] 396 ms` naquele pedido: o atraso foi **dentro do agente**.
+
+**Achados:**
+1. Tempo no agente por requisição (`[OK n] X ms`): 7 ms ×35, **8 ms ×553**, 9 ms ×132, 10–13 ms ×61, 396 ms ×1. Mediana 8 ms ≈ 70% do RTT de ~11 ms visto no Bridge → só ~3 ms são rede.
+2. Suspeita: `fflush` a cada linha de log no SD (2 linhas por requisição, uma delas dentro da janela medida) custa ~7 ms e explica também o pico de 396 ms. **Hipótese** — a v0.1.2 passa a bufferizar o log e a descarregar só com o link ocioso; esperado: `[OK]` de ~1–2 ms.
+3. 12 linhas `[CLOSE] replaced by a new connection` seguidas às 21:24:10–11: são as reconexões rápidas do teste (o novo connect chega antes de o agente processar o FIN do anterior). Inofensivo.
+4. Início/fim limpos nas 3 sessões (`Exiting` + `agent exit`): sair com START e reabrir funciona, e a porta 6464 volta.
+
 ## Pendências de medição
+- Reavaliar `[OK] ms` e RTT com a v0.1.2 (log bufferizado).
 - Vazão de leitura/escrita do SD e de rede (chunk 16 vs 64 KiB) — M4/M5.
 - Custo de SHA-256 no ARM11.

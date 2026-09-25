@@ -45,6 +45,8 @@ static uint64_t g_next_soc_try = 0, g_next_listen_try = 0, g_last_check = 0;
 static Result g_last_acu = 0;
 static bool g_first_check = true;
 static uint64_t g_start_ms = 0;
+static uint64_t g_last_flush_ms = 0, g_last_req_ms = 0;
+static uint32_t g_seen_requests = 0;
 
 static uint64_t now_ms(void *ctx) {
   (void)ctx;
@@ -305,6 +307,13 @@ int main(void) {
     }
 
     now = now_ms(NULL);
+    /* Flush the buffered SD log only when the link is quiet (or at least every 5 s). */
+    if (g_srv.requests != g_seen_requests) { g_seen_requests = g_srv.requests; g_last_req_ms = now; }
+    if (alog_unflushed() &&
+        ((now - g_last_req_ms >= 250 && now - g_last_flush_ms >= 500) || now - g_last_flush_ms >= 5000)) {
+      alog_flush();
+      g_last_flush_ms = now;
+    }
     if (changed || alog_dirty()) draw_pending = true;
     if ((draw_pending && now - last_draw >= DRAW_MIN_MS) || now - last_draw >= DRAW_MAX_MS) {
       alog_clear_dirty();

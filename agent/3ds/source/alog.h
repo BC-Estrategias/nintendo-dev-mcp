@@ -17,4 +17,9 @@ const char *alog_get(int index_from_newest);
 bool alog_dirty(void);
 void alog_clear_dirty(void);
 
+/* File writes are buffered (a per-line fflush to the SD measured ~7 ms per request, with a 396 ms
+ * stall once). The main loop calls alog_flush() when the link is idle. ERROR/WARN lines flush at once. */
+bool alog_unflushed(void);
+void alog_flush(void);
+
 #endif
