@@ -164,5 +164,7 @@ node $M ls $IP /luma               # PROTECTED_PATH
 ```bash
 node bridge/packages/cli/src/main.ts info <ip>
 ```
-Esperado: `model` (o seu New 3DS/XL), `firmware` (ex.: `11.17.0-50U`), `RAM 256.0 MiB` (New) ou `128.0 MiB` (Old), memória do app e do sistema, e `SD card X GiB free of Y GiB`. **Anote o tempo do comando**: ler o espaço livre do SD pode levar alguns segundos. Confira o espaço livre com o que o Mac mostra do cartão. Funciona em `READ_ONLY`.
+Esperado: `model` (o seu New 3DS/XL), `firmware` (ex.: `11.17.0-50U`), `RAM 256.0 MiB` (New) ou `128.0 MiB` (Old), memória do sistema (a do app não é informada no 3DS), e `SD card X GiB free of Y GiB`. **Anote o tempo do comando**: ler o espaço livre do SD pode levar alguns segundos. Confira o espaço livre com o que o Mac mostra do cartão. Funciona em `READ_ONLY`.
 
+
+**Resultado real (New 3DS XL, v1.1.0, 2026-09-25, 0,18 s):** `New Nintendo 3DS XL`, `11.17.0-50U`, RAM 256 MiB, sys mem 79.7 de 100 MiB, SD 21.85 de 59.45 GiB. A linha "app mem" saiu como `0.0 free of 64.0` (enganosa) e foi removida na v1.1.1.

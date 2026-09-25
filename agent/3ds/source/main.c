@@ -217,9 +217,8 @@ static int device_info(void *ctx, ndp_device_info *di) {
              (unsigned long)GET_VERSION_MINOR(k), (unsigned long)GET_VERSION_REVISION(k));
     di->has |= NDP_DI_FIRMWARE;
   }
-  di->app_mem_total = osGetMemRegionSize(MEMREGION_APPLICATION);
-  di->app_mem_free = osGetMemRegionFree(MEMREGION_APPLICATION);
-  di->has |= NDP_DI_APP_MEM;
+  /* The application region is deliberately NOT reported: the agent takes all of it at start-up (so "free" would always
+   * be 0) and its size is the memory mode of the agent's own CIA (64 MB), not what a game would get (up to 124 MB). */
   di->sys_mem_total = osGetMemRegionSize(MEMREGION_SYSTEM);
   di->sys_mem_free = osGetMemRegionFree(MEMREGION_SYSTEM);
   di->has |= NDP_DI_SYS_MEM;
