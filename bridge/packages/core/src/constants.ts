@@ -15,6 +15,8 @@ export const FLAGS_KNOWN = Flag.MAC | Flag.MORE;
 export const Command = {
   HELLO: 0x0001,
   PING: 0x0002,
+  PAIR: 0x0004,
+  AUTH: 0x0005,
   FS_LIST: 0x0020,
   FS_STAT: 0x0021,
   FS_READ: 0x0022,
@@ -91,6 +93,12 @@ export const Tag = {
   WRITTEN: 0x0044,
   MAX_CHUNK: 0x0045,
   TRASH_PATH: 0x0046,
+  PAIRED_KEYS: 0x0047,
+  PAIRING_OPEN: 0x0048,
+  DEVICE_ID: 0x0049,
+  KEY_ID: 0x004a,
+  PROOF: 0x004b,
+  LABEL: 0x004c,
 } as const;
 
 export type Mode = "READ_ONLY" | "DEVELOPMENT" | "FULL";

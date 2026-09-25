@@ -10,19 +10,32 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "alog.h"
+#include "ndp/ndp_keystore_file.h"
 #include "ndp/ndp_posix_fs.h"
 #include "ndp/ndp_server.h"
 
 #define AGENT_PORT NDP_DEFAULT_PORT
 
 /* DEVELOPMENT BUILD: the agent starts with writes ENABLED (only inside /3ds/nintendo-dev-agent, never in
- * /Nintendo 3DS, /luma, /boot.firm...). There is no pairing yet, so any device on the LAN could write
- * there while this mode is on. Switch to NDP_MODE_READ_ONLY before distributing (ARCHITECTURE.md §5).
- * X toggles the mode at run time. */
+ * /Nintendo 3DS, /luma, /boot.firm...). Every computer must be paired first (AGENT_AUTH_REQUIRED, spec §4),
+ * but a paired computer can write right away. Switch to NDP_MODE_READ_ONLY before distributing
+ * (ARCHITECTURE.md §5). X toggles the mode at run time. */
+#ifndef AGENT_START_MODE
 #define AGENT_START_MODE NDP_MODE_DEVELOPMENT
+#endif
+/* 1 = pairing + HMAC required (the default and the only setting fit for distribution); 0 = no auth (tests). */
+#ifndef AGENT_AUTH_REQUIRED
+#define AGENT_AUTH_REQUIRED 1
+#endif
+#define AGENT_DIR "sdmc:/3ds/nintendo-dev-agent"
+#define CONFIG_DIR AGENT_DIR "/config"
+#define KEYS_FILE CONFIG_DIR "/pairing.bin"
+#define PAIRING_WINDOW_MS 120000u
+#define FORGET_CONFIRM_MS 5000u
 #define SOC_ALIGN 0x1000
 #define SOC_BUFSIZE 0x100000
 
@@ -165,6 +178,43 @@ static int random_bytes(void *ctx, uint8_t *out, size_t n) {
   if (g_ps_ok && R_SUCCEEDED(PS_GenerateRandomBytes(out, n))) return 0;
   alog("ERR: PS random unavailable");
   return -1;
+}
+
+static void draw(uint64_t now);
+static ndp_keystore g_keys;
+static bool g_keys_dirty_warn = false;     /* the last save failed */
+static uint64_t g_forget_armed_until = 0;  /* SELECT pressed once: a second press before this time forgets everything */
+
+/* The key store is written by the server after a pairing/forget; it lives in the config folder, which
+ * no protocol command can read or write. */
+static void keys_changed(void *ctx, const ndp_keystore *keys) {
+  int rc;
+  (void)ctx;
+  rc = ndp_keystore_save_file(keys, KEYS_FILE);
+  g_keys_dirty_warn = rc != 0;
+  if (rc != 0) alog("ERR: cannot save pairing keys (%d): pairing will be lost when the agent exits", rc);
+}
+
+/* Opens the pairing window: the console generates the code and shows it on the TOP screen only —
+ * it is never written to the log (which the protocol can read). */
+static void open_pairing(void) {
+  uint8_t code[NDP_CODE_BYTES];
+  if (!AGENT_AUTH_REQUIRED) return;
+  if (ndp_server_pairing_remaining_ms(&g_srv) > 0) {
+    ndp_server_close_pairing(&g_srv);
+    memset(code, 0, sizeof code);
+    return;
+  }
+  if (g_srv.keys.count >= NDP_MAX_KEYS) {
+    alog("Pairing: storage full (%d computers). Press SELECT twice to forget them all.", NDP_MAX_KEYS);
+    return;
+  }
+  if (random_bytes(NULL, code, sizeof code) != 0) {
+    alog("Pairing unavailable: no secure random source");
+    return;
+  }
+  ndp_server_open_pairing(&g_srv, code, PAIRING_WINDOW_MS);
+  memset(code, 0, sizeof code);
 }
 
 static void set_err(const char *fmt, unsigned long v) { snprintf(g_err, sizeof g_err, fmt, v); }
@@ -321,11 +371,28 @@ static void draw(uint64_t now) {
   else printf("Bridge : not connected\n");
   if (g_srv.agent_cfg.mode == NDP_MODE_READ_ONLY) printf("Mode   : " C_GREEN "READ_ONLY" C_RESET " (no writes)\n");
   else printf("Mode   : " C_YELLOW "%s" C_RESET " (writes on)\n", ndp_mode_name(g_srv.agent_cfg.mode));
-  printf("Write  : /3ds/nintendo-dev-agent\nAuth   : none (dev build)\n");
+  printf("Write  : /3ds/nintendo-dev-agent\n");
+  if (!AGENT_AUTH_REQUIRED) printf("Auth   : " C_RED "NONE" C_RESET " (test build)\n");
+  else printf("Auth   : required - %d paired\n", g_srv.keys.count);
   hms(up, sizeof up, now - g_start_ms);
   printf("Uptime : %s   Requests: %lu\n", up, (unsigned long)g_srv.requests);
   if (g_err[0]) printf("\n" C_RED "%s" C_RESET "\n", g_err);
-  printf("\n\nX = toggle mode    START = Exit\n");
+  if (g_keys_dirty_warn) printf(C_RED "Pairing not saved (SD error)" C_RESET "\n");
+  if (AGENT_AUTH_REQUIRED) {
+    uint32_t left = ndp_server_pairing_remaining_ms(&g_srv);
+    if (left > 0) {
+      char text[NDP_CODE_TEXT];
+      ndp_code_encode(g_srv.pairing.code, text);
+      printf("\n" C_YELLOW "PAIRING OPEN" C_RESET " (%lu s)\nCode: " C_CYAN "%s" C_RESET "\n"
+             "Type it in 'ndev pair <ip>' on your computer.\n",
+             (unsigned long)((left + 999) / 1000), text);
+    } else if (g_forget_armed_until > now) {
+      printf("\n" C_RED "Press SELECT again to forget ALL paired computers" C_RESET "\n");
+    } else {
+      printf("\n\n\n");
+    }
+  }
+  printf("\nY = pair   SELECT x2 = forget   X = mode\nSTART = Exit\n");
 
   consoleSelect(&g_bot);
   consoleClear();
@@ -371,7 +438,7 @@ int main(void) {
   cfg.platform = "3ds";
   cfg.agent_version = NDP_AGENT_VERSION;
   cfg.mode = AGENT_START_MODE;
-  cfg.auth = "none";
+  cfg.auth = AGENT_AUTH_REQUIRED ? "required" : "none";
   cfg.max_frame = NDP_DEFAULT_MAX_FRAME;
   cfg.random_bytes = random_bytes;
   if (ndp_posix_fs_init(&g_fs_base, &g_fs_ctx, "sdmc:") == 0) {
@@ -392,7 +459,28 @@ int main(void) {
   memset(&plat, 0, sizeof plat);
   plat.now_ms = now_ms;
   plat.log = srv_log;
+  plat.keys_changed = keys_changed;
   ndp_server_init(&g_srv, &plat, &cfg);
+
+  if (AGENT_AUTH_REQUIRED) {
+    struct stat sb;
+    int lr;
+    /* The config folder must exist before the first pairing is saved. Creating a folder on the 3DS SD
+     * takes ~6 s (measured), so it is done here, once, and not while a computer waits for PAIR. */
+    if (stat(CONFIG_DIR, &sb) != 0) {
+      alog("Creating %s (one time, ~6 s)...", CONFIG_DIR);
+      draw(now_ms(NULL));
+      if (mkdir(CONFIG_DIR, 0777) != 0) alog("ERR: cannot create the config folder");
+    }
+    lr = ndp_keystore_load_file(&g_keys, KEYS_FILE);
+    if (lr < 0) alog("WARN: pairing file is corrupt: ignored (no computer is paired)");
+    else if (lr == 0) alog("Loaded %d paired computer(s)", g_keys.count);
+    if (!g_keys.has_device_id && random_bytes(NULL, g_keys.device_id, sizeof g_keys.device_id) == 0) {
+      g_keys.has_device_id = 1;
+      keys_changed(NULL, &g_keys);
+    }
+    ndp_server_set_keys(&g_srv, &g_keys);
+  }
 
   draw(now_ms(NULL));
   while (aptMainLoop()) {
@@ -400,6 +488,20 @@ int main(void) {
     bool changed;
     hidScanInput();
     if (hidKeysDown() & KEY_START) break;
+    if (AGENT_AUTH_REQUIRED && (hidKeysDown() & KEY_Y)) {
+      open_pairing();
+      draw_pending = true;
+    }
+    if (AGENT_AUTH_REQUIRED && (hidKeysDown() & KEY_SELECT)) {
+      uint64_t t = now_ms(NULL);
+      if (g_forget_armed_until > t) {
+        ndp_server_clear_keys(&g_srv);
+        g_forget_armed_until = 0;
+      } else {
+        g_forget_armed_until = t + FORGET_CONFIRM_MS;
+      }
+      draw_pending = true;
+    }
     if (hidKeysDown() & KEY_X) {
       ndp_mode next = g_srv.agent_cfg.mode == NDP_MODE_READ_ONLY ? NDP_MODE_DEVELOPMENT : NDP_MODE_READ_ONLY;
       ndp_server_set_mode(&g_srv, next);

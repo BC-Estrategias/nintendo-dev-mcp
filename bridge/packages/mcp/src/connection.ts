@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { DEFAULT_PORT, NdpClient, NdpTransportError, discover, type FoundDevice } from "@ndev/core";
+import { DEFAULT_PORT, KeyStore, NdpClient, NdpRemoteError, NdpTransportError, discover, type FoundDevice } from "@ndev/core";
 
 
 export interface ConnectionOptions {
@@ -11,6 +11,8 @@ export interface ConnectionOptions {
   requestTimeoutMs?: number | undefined;
   /** Where the last working host is remembered (null = do not persist). */
   cacheFile?: string | null | undefined;
+  /** Pairing keys (default: ~/.config/nintendo-dev/keys.json, or NDEV_KEYS_FILE). */
+  keys?: KeyStore | undefined;
 }
 
 export class DeviceNotFoundError extends Error {
@@ -27,9 +29,11 @@ export class DeviceConnection {
   readonly #opts: ConnectionOptions;
   #client: NdpClient | null = null;
   #host: string | null = null;
+  readonly #keys: KeyStore;
 
   constructor(opts: ConnectionOptions = {}) {
     this.#opts = opts;
+    this.#keys = opts.keys ?? new KeyStore();
   }
 
   get port(): number {
@@ -67,17 +71,11 @@ export class DeviceConnection {
   }
 
   async #tryConnect(host: string, attempts: number): Promise<NdpClient> {
-    const c = await NdpClient.connect({
-      host, port: this.port, attempts,
-      ...(this.#opts.requestTimeoutMs ? { requestTimeoutMs: this.#opts.requestTimeoutMs } : {}),
-    });
-    try {
-      await c.hello();
-    } catch (e) {
-      c.close();
-      throw e;
-    }
-    return c;
+    const { client } = await NdpClient.open(
+      { host, port: this.port, attempts, ...(this.#opts.requestTimeoutMs ? { requestTimeoutMs: this.#opts.requestTimeoutMs } : {}) },
+      this.#keys,
+    );
+    return client;
   }
 
   /** Finds the console: explicit host, env, last known host, then a LAN scan (DHCP changes the IP). */
@@ -94,7 +92,8 @@ export class DeviceConnection {
         const c = await this.#tryConnect(cached.host, 1);
         this.#host = cached.host;
         return c;
-      } catch {
+      } catch (e) {
+        if (e instanceof NdpRemoteError) throw e; // reachable but refusing (not paired / key rejected): scanning will not help
         /* the address changed: scan */
       }
     }

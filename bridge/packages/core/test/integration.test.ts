@@ -1,6 +1,7 @@
 // Integration: TypeScript client <-> the C core running inside the host agent (real TCP).
 import { strict as assert } from "node:assert";
 import { type ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { connect } from "node:net";
 import { after, before, describe, test } from "node:test";
 import { SKIP, startAgent } from "./helpers.ts";
@@ -10,6 +11,10 @@ import {
 } from "../src/index.ts";
 
 const suite = SKIP ? describe.skip : describe;
+// the version the C agent is built with (single source of truth: ndp_defs.h)
+const AGENT_VERSION = /NDP_AGENT_VERSION "([^"]+)"/.exec(
+  readFileSync(new URL("../../../../agent/common/include/ndp/ndp_defs.h", import.meta.url), "utf8"),
+)![1];
 const it = SKIP ? test.skip : test;
 
 suite("host agent over TCP", () => {
@@ -26,7 +31,7 @@ suite("host agent over TCP", () => {
       const info = await c.hello();
       assert.equal(info.protocol, 1);
       assert.equal(info.platform, "host");
-      assert.equal(info.agentVersion, "0.4.0");
+      assert.equal(info.agentVersion, AGENT_VERSION);
       assert.equal(info.mode, "READ_ONLY");
       assert.equal(info.auth, "none");
       assert.equal(info.maxFrame, DEFAULT_MAX_FRAME);

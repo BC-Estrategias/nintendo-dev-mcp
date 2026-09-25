@@ -40,7 +40,7 @@ O endereço do console **não precisa** ser configurado: o servidor usa `--host`
 - **Sandbox local:** upload/download só dentro de `--local-root` (resolve symlinks e `..`); nenhum arquivo local é sobrescrito sem `overwrite_local=true`.
 - **Auditoria:** `~/.config/nintendo-dev/audit.log` (JSON lines: quando, ferramenta, caminhos, ok/status, ms — **nunca o conteúdo**). `--no-audit` desliga.
 - Escritas e deletes **nunca são repetidos** automaticamente após uma falha de conexão (o resultado seria ambíguo); leituras são repetidas uma vez.
-- Sem pareamento ainda: com o modo `DEVELOPMENT` ligado no console (build de desenvolvimento), qualquer aparelho da rede pode escrever na pasta liberada. Ver `ARCHITECTURE.md` §5.
+- **Pareamento (agente ≥ 0.5.0):** o console só atende computadores pareados e sela todos os frames com HMAC. O pareamento é feito **pela pessoa**, uma vez por computador: aperta **Y** no console e roda `ndev pair <ip>` num terminal, digitando o código da tela. O servidor MCP **não tem ferramenta de pareamento** (o modelo nunca vê nem digita o código): sem pareamento, as ferramentas devolvem `UNAUTHORIZED` com essa instrução. A chave fica em `~/.config/nintendo-dev/keys.json` (0600; `$NDEV_KEYS_FILE` muda o caminho). Ver `ARCHITECTURE.md` §4.2.
 
 ## Testes
-`bridge/packages/mcp/test/mcp.test.ts` (13 testes) usa um cliente stdio roteirizado com os handshakes exatos do Claude Code e do Codex, contra o núcleo C real (agente de teste), incluindo um agente falso que cai no meio de um pedido para provar que escritas não são repetidas.
+`bridge/packages/mcp/test/mcp.test.ts` (15 testes) usa um cliente stdio roteirizado com os handshakes exatos do Claude Code e do Codex, contra o núcleo C real (agente de teste), incluindo um agente falso que cai no meio de um pedido para provar que escritas não são repetidas.

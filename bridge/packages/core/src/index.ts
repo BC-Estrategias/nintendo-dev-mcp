@@ -6,3 +6,4 @@ export * from "./path.ts";
 export * from "./policy.ts";
 export * from "./client.ts";
 export * from "./discovery.ts";
+export * from "./auth.ts";

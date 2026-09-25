@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
-import { Command, FrameDecoder, Kind, Tag, encodeFrame, encodeTlv, str, u16, u32 } from "@ndev/core";
+import { Command, FrameDecoder, Kind, KeyStore, NdpClient, Tag, codeDecode, derivePsk, encodeFrame, encodeTlv, str, u16, u32 } from "@ndev/core";
 import { SKIP, startAgent } from "../../core/test/helpers.ts";
 
 const MAIN = fileURLToPath(new URL("../src/main.ts", import.meta.url));
@@ -33,8 +33,8 @@ class McpDriver {
   #pending = new Map<number, (m: any) => void>();
   #id = 0;
   stderr = "";
-  constructor(args: string[]) {
-    this.proc = spawn(process.execPath, [MAIN, ...args], { stdio: ["pipe", "pipe", "pipe"] });
+  constructor(args: string[], env: Record<string, string> = {}) {
+    this.proc = spawn(process.execPath, [MAIN, ...args], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
     this.proc.stderr!.on("data", (d) => (this.stderr += d));
     createInterface({ input: this.proc.stdout! }).on("line", (l) => {
       try {
@@ -370,5 +370,63 @@ suite("ndev-mcp over stdio", () => {
 
   test("stdout carries only protocol messages (logs go to stderr)", () => {
     assert.equal(mcp.stderr.includes('"jsonrpc"'), false);
+  });
+});
+
+suite("ndev-mcp with a console that requires pairing", () => {
+  let dir: string;
+  let agent: { proc: ChildProcess; port: number };
+  const CODE = "7QK3-M9XD-4WPZ-A2HB";
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), "ndev-mcp-auth-"));
+    mkdirSync(join(dir, "sd/3ds/nintendo-dev-agent"), { recursive: true });
+    writeFileSync(join(dir, "sd/3ds/nintendo-dev-agent/test.txt"), "Hello from Nintendo 3DS");
+    agent = await startAgent(["--root", join(dir, "sd"), "--mode", "DEVELOPMENT", "--auth", "required", "--pair-code", CODE, "--keys-file", join(dir, "console.bin")]);
+  });
+  after(() => {
+    agent.proc.kill();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const driver = (keys: string) =>
+    new McpDriver(["--host", "127.0.0.1", "--port", String(agent.port), "--cache-file", "none", "--no-audit"], { NDEV_KEYS_FILE: keys });
+
+  test("an unpaired computer gets an actionable error, and the assistant has no way to pair", async () => {
+    const d = driver(join(dir, "none.json"));
+    try {
+      await d.init();
+      const tools = (await d.rpc("tools/list", {})).result.tools.map((t: { name: string }) => t.name);
+      assert.equal(tools.some((n: string) => /pair|auth/i.test(n)), false, "no pairing tool is exposed to the model");
+      const r = await d.call("nintendo_fs_read", { path: `${DIR}/test.txt` });
+      assert.equal(r.isError, true);
+      assert.match(text(r), /UNAUTHORIZED/);
+      assert.match(text(r), /ndev pair/);
+      assert.match(text(r), /Y/);
+      assert.equal(text(r).includes(CODE), false);
+    } finally {
+      d.close();
+    }
+  });
+
+  test("after the human pairs (ndev pair), the same tools work through the sealed channel", async () => {
+    const keys = join(dir, "keys.json");
+    const store = new KeyStore(keys);
+    const c = await NdpClient.connect({ host: "127.0.0.1", port: agent.port });
+    const info = await c.hello();
+    const { psk, keyId } = await c.pair(codeDecode(CODE)!, "mcp-test");
+    c.close();
+    assert.deepEqual(psk, derivePsk(codeDecode(CODE)!));
+    store.save({ deviceId: Buffer.from(info.deviceId!).toString("hex"), psk: Buffer.from(psk).toString("hex"), keyId: Buffer.from(keyId).toString("hex"), label: "mcp-test", pairedAt: "now" });
+    const d = driver(keys);
+    try {
+      await d.init();
+      assert.equal((await d.call("nintendo_fs_read", { path: `${DIR}/test.txt` })).structuredContent!.content, "Hello from Nintendo 3DS");
+      const w = await d.call("nintendo_fs_write", { path: `${DIR}/from-codex.txt`, content: "Codex was here." });
+      assert.equal(w.isError, undefined);
+      assert.equal(readFileSync(join(dir, "sd/3ds/nintendo-dev-agent/from-codex.txt"), "utf8"), "Codex was here.");
+    } finally {
+      d.close();
+    }
   });
 });

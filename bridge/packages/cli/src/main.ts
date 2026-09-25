@@ -1,13 +1,24 @@
 #!/usr/bin/env node
 import { createWriteStream } from "node:fs";
 import { once } from "node:events";
-import { DEFAULT_PORT, NdpClient, NdpRemoteError, NdpTransportError, PathInvalidError, discover } from "@ndev/core";
+import { hostname } from "node:os";
+import { createInterface } from "node:readline/promises";
+import {
+  DEFAULT_PORT, KeyStore, LABEL_MAX, NdpClient, NdpRemoteError, NdpTransportError, PathInvalidError, codeDecode,
+  discover,
+} from "@ndev/core";
 
 const USAGE = `ndev — Nintendo Dev Bridge (CLI)
 
 Usage:
   ndev find [port]                                scan this computer's subnets for a console running the agent
                                                   (the console's IP changes: DHCP)
+  ndev pair  <host[:port]> [--label NAME] [--code-stdin]
+                                                  pair this computer with the console: press Y on the console,
+                                                  then type the code it shows (the code is never sent)
+  ndev unpair <host[:port]>                       forget this computer's key for that console
+                                                  (to make the console forget ALL computers: its SELECT button)
+  ndev pairings                                   list the consoles this computer is paired with
   ndev hello <host[:port]>                        connect and print the agent's HELLO
   ndev ping  <host[:port]> [-c N] [-i MS]         HELLO + N pings (default 4), MS ms between pings
   ndev ls    <host[:port]> <path>                 list a directory on the device's SD card
@@ -69,10 +80,53 @@ function parseFlags(
 
 async function withClient<T>(target: string, fn: (c: NdpClient, host: string, port: number) => Promise<T>): Promise<T> {
   const { host, port } = parseTarget(target);
+  const { client } = await NdpClient.open({ host, port }, new KeyStore());
+  try {
+    return await fn(client, host, port);
+  } finally {
+    client.close();
+  }
+}
+
+async function readCode(fromStdin: boolean): Promise<string> {
+  if (!fromStdin && !process.stdin.isTTY)
+    throw new Error("the pairing code must be typed by a person: run this in a terminal (or use --code-stdin)");
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return (await rl.question("Code shown on the console (XXXX-XXXX-XXXX-XXXX): ")).trim();
+  } finally {
+    rl.close();
+  }
+}
+
+async function pairCommand(target: string, rest: string[]): Promise<number> {
+  const { text, on } = parseFlags(rest, [], ["--code-stdin"], ["--label"]);
+  const { host, port } = parseTarget(target);
+  const label = text.get("--label") ?? hostname().split(".")[0]!.slice(0, LABEL_MAX);
+  if (new TextEncoder().encode(label).length > LABEL_MAX) throw new Error(`--label must be at most ${LABEL_MAX} bytes`);
+  const keys = new KeyStore();
   const client = await NdpClient.connect({ host, port });
   try {
-    await client.hello();
-    return await fn(client, host, port);
+    const info = await client.hello();
+    if (info.auth !== "required") {
+      console.log("This agent does not use authentication (auth none: a development build). Nothing to pair.");
+      return 0;
+    }
+    const id = Buffer.from(info.deviceId!).toString("hex");
+    if (keys.find(id)) console.error("Note: this computer is already paired with this console; pairing again replaces the key.");
+    if (!info.pairingOpen) {
+      console.error("The console's pairing window is closed. Press Y on the console (it opens for 2 minutes), then run this again.");
+      return 1;
+    }
+    const code = codeDecode(await readCode(on.has("--code-stdin")));
+    if (!code) throw new Error("that is not a valid code (16 characters: 0-9 and A-Z without I, L, O, U)");
+    const { psk, keyId } = await client.pair(code, label);
+    keys.save({
+      deviceId: id, psk: Buffer.from(psk).toString("hex"), keyId: Buffer.from(keyId).toString("hex"), label,
+      lastHost: host, pairedAt: new Date().toISOString(),
+    });
+    console.log(`Paired with console ${id.slice(0, 8)}… as "${label}". Key saved in ${keys.path} (private to your user).`);
+    return 0;
   } finally {
     client.close();
   }
@@ -89,9 +143,33 @@ async function main(argv: string[]): Promise<number> {
     for (const f of found) console.log(`${f.host}:${f.port}  ${f.agent.platform} agent v${f.agent.agentVersion}  mode ${f.agent.mode}`);
     return 0;
   }
+  if (cmd === "pairings") {
+    const list = new KeyStore().list();
+    if (list.length === 0) console.log("not paired with any console");
+    for (const c of list) console.log(`${c.deviceId.slice(0, 8)}…  "${c.label}"  last seen ${c.lastHost ?? "?"}  paired ${c.pairedAt}`);
+    return 0;
+  }
   if (!cmd || cmd === "-h" || cmd === "--help") {
     console.log(USAGE);
     return cmd ? 0 : 2;
+  }
+  if ((cmd === "pair" || cmd === "unpair") && !target) {
+    console.error(USAGE);
+    return 2;
+  }
+  if (cmd === "pair") return pairCommand(target as string, rest);
+  if (cmd === "unpair") {
+    const { host, port } = parseTarget(target as string);
+    const client = await NdpClient.connect({ host, port });
+    try {
+      const info = await client.hello();
+      const keys = new KeyStore();
+      const id = info.deviceId ? Buffer.from(info.deviceId).toString("hex") : "";
+      console.log(id && keys.remove(id) ? "This computer's key for that console was deleted." : "This computer had no key for that console.");
+      return 0;
+    } finally {
+      client.close();
+    }
   }
   if (!["hello", "ping", "ls", "stat", "cat", "get", "put", "mkdir", "rm"].includes(cmd) || !target) {
     console.error(USAGE);

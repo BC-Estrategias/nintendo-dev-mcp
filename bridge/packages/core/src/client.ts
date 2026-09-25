@@ -8,7 +8,8 @@ import {
   type Mode, MODES,
 } from "./constants.ts";
 import { NdpProtocolError, NdpRemoteError, NdpTransportError } from "./errors.ts";
-import { encodeFrame, FrameDecoder, type Frame } from "./frame.ts";
+import { bytesEqual, keyIdOf, LABEL_MAX, proofOf, sessionKeyOf, derivePsk, type KeyStore } from "./auth.ts";
+import { encodeFrame, encodeHeader, frameMac, FrameDecoder, type Frame, type FrameInit } from "./frame.ts";
 import { normalizePath } from "./path.ts";
 import { encodeTlv, parseTlv, str, u8, u16, u32, u64, type TlvField } from "./tlv.ts";
 
@@ -79,6 +80,19 @@ export interface HelloInfo {
   auth: string;
   mode: Mode;
   maxFrame: number;
+  /** Console identity (present when the agent requires authentication). */
+  deviceId?: Uint8Array;
+  /** How many computers the console is paired with. */
+  pairedKeys?: number;
+  /** True while the console's pairing window is open. */
+  pairingOpen?: boolean;
+}
+
+/** Sealed-channel state after a successful AUTH (spec §4.5). */
+interface Session {
+  key: Uint8Array;
+  sendCtr: bigint;
+  recvCtr: bigint;
 }
 
 /** Operations that create/commit things on the SD card can legitimately take several seconds. */
@@ -110,6 +124,11 @@ export class NdpClient {
   #nextId = 0;
   #chain: Promise<unknown> = Promise.resolve();
   #info: HelloInfo | null = null;
+  #cn: Uint8Array | null = null;
+  /** Set once AUTH succeeded: from then on every frame in both directions carries a MAC. */
+  #session: Session | null = null;
+  /** Set while the AUTH request is in flight: its RES is the first sealed frame. */
+  #pending: Session | null = null;
 
   private constructor(socket: Socket, opts: ConnectOptions) {
     this.#socket = socket;
@@ -137,6 +156,41 @@ export class NdpClient {
         if (i >= attempts || !(e instanceof NdpTransportError) || !isTransientConnectError(e.code)) throw e;
         await new Promise((r) => setTimeout(r, 250 * 2 ** (i - 1)));
       }
+    }
+  }
+
+  /**
+   * connect + hello + (when the console requires it) authenticate with the key stored for that console.
+   * Throws NdpRemoteError(UNAUTHORIZED) with an actionable message when this computer is not paired
+   * or the console forgot the pairing.
+   */
+  static async open(opts: ConnectOptions, keys?: KeyStore): Promise<{ client: NdpClient; info: HelloInfo }> {
+    const client = await NdpClient.connect(opts);
+    try {
+      const info = await client.hello();
+      if (info.auth === "required") {
+        const known = info.deviceId && keys ? keys.find(info.deviceId) : undefined;
+        if (!known)
+          throw new NdpRemoteError(
+            Status.UNAUTHORIZED,
+            `this computer is not paired with the console${info.pairingOpen ? " (its pairing window is open: run 'ndev pair <host>')" : " (press Y on the console to open its pairing window, then run 'ndev pair <host>')"}`,
+          );
+        try {
+          await client.authenticate(new Uint8Array(Buffer.from(known.psk, "hex")));
+        } catch (e) {
+          if (e instanceof NdpRemoteError && e.status === Status.UNAUTHORIZED)
+            throw new NdpRemoteError(
+              Status.UNAUTHORIZED,
+              "the console rejected the stored pairing key (it was probably reset): press Y on the console and run 'ndev pair <host>' again",
+            );
+          throw e;
+        }
+        if (known.lastHost !== opts.host) keys?.save({ ...known, lastHost: opts.host });
+      }
+      return { client, info };
+    } catch (e) {
+      client.close();
+      throw e;
     }
   }
 
@@ -184,8 +238,48 @@ export class NdpClient {
       this.#socket.destroy();
       return;
     }
-    this.#frames.push(...frames);
+    for (const f of frames) {
+      if (!this.#verifyIncoming(f)) {
+        this.#fail(new NdpProtocolError(Status.BAD_FRAME, "frame authentication failed (missing or invalid MAC)"));
+        this.#socket.destroy();
+        return;
+      }
+      this.#frames.push(f);
+    }
     this.#deliver();
+  }
+
+  /** Checks the MAC and counter of a frame arriving on an authenticated (or authenticating) channel. */
+  #verifyIncoming(f: Frame): boolean {
+    const s = this.#session ?? this.#pending;
+    if (!s) return f.mac === null; // an agent must not send MACs before AUTH
+    if (!f.mac) {
+      // While AUTH is in flight a refusal (ERR) legitimately comes unsealed; nothing else may.
+      return !this.#session && f.header.kind === Kind.ERR;
+    }
+    const expect = frameMac(s.key, s.recvCtr, encodeHeader(f.header), f.payload);
+    if (!bytesEqual(expect, f.mac)) return false;
+    s.recvCtr += 1n;
+    if (!this.#session) {
+      // First sealed frame = the AUTH RES: the channel is now authenticated.
+      this.#session = s;
+      this.#pending = null;
+    }
+    return true;
+  }
+
+  /** encodeFrame that seals the frame once the channel is authenticated. */
+  #encode(init: FrameInit): Uint8Array {
+    const s = this.#session;
+    if (!s) return encodeFrame(init);
+    const payload = init.payload ?? new Uint8Array(0);
+    const header = encodeHeader({
+      version: init.version ?? PROTOCOL_VERSION, kind: init.kind, flags: (init.flags ?? 0) | Flag.MAC,
+      requestId: init.requestId, command: init.command, status: init.status ?? 0, payloadLength: payload.length,
+    });
+    const mac = frameMac(s.key, s.sendCtr, header, payload);
+    s.sendCtr += 1n;
+    return encodeFrame({ ...init, mac });
   }
 
   #deliver(): void {
@@ -250,7 +344,7 @@ export class NdpClient {
   #sendRequest(command: number, payload: Uint8Array): number {
     if (this.#failure) throw this.#failure;
     const id = (this.#nextId = (this.#nextId + 1) >>> 0 || 1);
-    this.#socket.write(encodeFrame({ kind: Kind.REQ, requestId: id, command, payload }));
+    this.#socket.write(this.#encode({ kind: Kind.REQ, requestId: id, command, payload }));
     return id;
   }
 
@@ -277,11 +371,12 @@ export class NdpClient {
   }
 
   async hello(): Promise<HelloInfo> {
+    const cn = new Uint8Array(randomBytes(16));
     const payload = encodeTlv([
       [Tag.PROTOCOL, u16(PROTOCOL_VERSION)],
       [Tag.PROTOCOL_MAX, u16(PROTOCOL_VERSION)],
       [Tag.BRIDGE_NAME, str(this.#bridgeName)],
-      [Tag.NONCE, new Uint8Array(randomBytes(16))],
+      [Tag.NONCE, cn],
     ]);
     const res = await this.request(Command.HELLO, payload);
     const t = parseTlv(res.payload);
@@ -298,9 +393,65 @@ export class NdpClient {
       !(MODES as readonly string[]).includes(mode)
     )
       throw new NdpProtocolError(9, "malformed HELLO response");
-    this.#info = { protocol, platform, agentVersion, deviceNonce: nonce, auth, mode: mode as Mode, maxFrame };
+    const deviceId = t.first(Tag.DEVICE_ID);
+    const pairedKeys = t.u8(Tag.PAIRED_KEYS);
+    const pairingOpen = t.u8(Tag.PAIRING_OPEN);
+    if (auth === "required" && (deviceId === undefined || deviceId.length !== 16))
+      throw new NdpProtocolError(Status.BAD_REQUEST, "malformed HELLO response (no device_id)");
+    this.#cn = cn;
+    this.#info = {
+      protocol, platform, agentVersion, deviceNonce: nonce, auth, mode: mode as Mode, maxFrame,
+      ...(deviceId ? { deviceId } : {}),
+      ...(pairedKeys !== undefined ? { pairedKeys } : {}),
+      ...(pairingOpen !== undefined ? { pairingOpen: pairingOpen !== 0 } : {}),
+    };
     this.#decoder = new FrameDecoder(maxFrame);
     return this.#info;
+  }
+
+  /** True once AUTH succeeded and every frame is being sealed. */
+  get authenticated(): boolean {
+    return this.#session !== null;
+  }
+
+  #requireHello(): { cn: Uint8Array; dn: Uint8Array } {
+    if (!this.#cn || !this.#info) throw new Error("call hello() first");
+    return { cn: this.#cn, dn: this.#info.deviceNonce };
+  }
+
+  /**
+   * Pairs with the console using the code it displays (its pairing window must be open). Returns the
+   * key to persist. The code is typed by the human; it is never sent — only a proof derived from it.
+   */
+  async pair(code: Uint8Array, label: string): Promise<{ psk: Uint8Array; keyId: Uint8Array }> {
+    const { cn, dn } = this.#requireHello();
+    const labelBytes = new TextEncoder().encode(label);
+    if (labelBytes.length === 0 || labelBytes.length > LABEL_MAX) throw new RangeError(`label must be 1..${LABEL_MAX} bytes`);
+    const psk = derivePsk(code);
+    const res = await this.request(
+      Command.PAIR,
+      encodeTlv([[Tag.LABEL, labelBytes], [Tag.PROOF, proofOf(psk, "pair", cn, dn, labelBytes)]]),
+      SLOW_FS_TIMEOUT_MS, // the console writes its key file to the SD card before answering
+    );
+    const keyId = parseTlv(res.payload).first(Tag.KEY_ID);
+    const expected = keyIdOf(psk);
+    if (!keyId || !bytesEqual(keyId, expected)) throw new NdpProtocolError(Status.BAD_REQUEST, "console returned an unexpected key_id");
+    return { psk, keyId };
+  }
+
+  /** Proves knowledge of the PSK and switches the connection to sealed frames. */
+  async authenticate(psk: Uint8Array): Promise<void> {
+    const { cn, dn } = this.#requireHello();
+    if (this.#session) throw new Error("already authenticated");
+    const payload = encodeTlv([[Tag.KEY_ID, keyIdOf(psk)], [Tag.PROOF, proofOf(psk, "auth", cn, dn)]]);
+    this.#pending = { key: sessionKeyOf(psk, cn, dn), sendCtr: 0n, recvCtr: 0n };
+    try {
+      await this.request(Command.AUTH, payload);
+    } catch (e) {
+      this.#pending = null;
+      throw e;
+    }
+    if (!this.#session) throw new NdpProtocolError(Status.UNAUTHORIZED, "AUTH answered without a valid MAC");
   }
 
   async stat(path: string): Promise<FsStat> {
@@ -466,7 +617,7 @@ export class NdpClient {
         return i >= 0 ? this.#remoteError(this.#frames.splice(i, 1)[0] as Frame) : undefined;
       };
       const send = async (bytes: Uint8Array) => {
-        const frame = encodeFrame({
+        const frame = this.#encode({
           kind: Kind.DATA, requestId: id, command: Command.FS_WRITE, payload: bytes,
           flags: sent + bytes.length < source.size ? Flag.MORE : 0,
         });
@@ -488,7 +639,7 @@ export class NdpClient {
       }
       const err = early();
       if (err) throw err;
-      await this.#writeFrame(encodeFrame({ kind: Kind.END, requestId: id, command: Command.FS_WRITE }));
+      await this.#writeFrame(this.#encode({ kind: Kind.END, requestId: id, command: Command.FS_WRITE }));
 
       let final: Frame;
       try {

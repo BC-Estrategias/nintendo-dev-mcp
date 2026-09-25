@@ -92,3 +92,33 @@ $ndev put $IP --text x /3ds/nintendo-dev-agent/config/k   # PROTECTED_PATH
 ```
 Aperte **X** (modo `READ_ONLY`) e repita o primeiro `put`: deve falhar com `FORBIDDEN_MODE`.
 **Coletar:** a saída de tudo, a tela do agente e as linhas `[OK n] N bytes … KiB/s` (vazão de escrita).
+
+
+## M5 (parte 2) — pareamento — agente v0.5.0
+
+**Antes:** apague a versão anterior do agente do cartão SD (o `ndev put` da v0.4.0 ainda funciona porque ela não tem autenticação) e abra a v0.5.0. Na **primeira** abertura o agente cria `/3ds/nintendo-dev-agent/config/` (uma vez, ~6 s: a tela pode parecer parada) e gera a identidade do console. Confira: `Auth   : required - 0 paired`.
+
+No Mac (o 3DS **não** deve estar pareado ainda):
+```bash
+ndev="node bridge/packages/cli/src/main.ts"; IP=<IP_DO_3DS>
+$ndev hello $IP                    # auth required; sem pareamento, os comandos abaixo devem falhar
+$ndev ls $IP /                     # FALHA: "not paired ... press Y on the console"
+$ndev pair $IP                     # FALHA: "pairing window is closed" (ainda não apertou Y)
+```
+**Pareando (feito por você, não pela IA):**
+1. No 3DS aperte **Y**: a tela superior mostra `PAIRING OPEN (120 s)` e o código `XXXX-XXXX-XXXX-XXXX`.
+2. No Mac, num terminal seu: `$ndev pair $IP` e digite o código (minúsculas e sem hífen também servem).
+3. Esperado: `Paired with console …`; a tela do 3DS passa a `Auth: required - 1 paired` e a janela **fecha sozinha**. O código **não** aparece no `agent.log` (confira: `$ndev cat $IP /3ds/nintendo-dev-agent/agent.log --tail 30`).
+```bash
+$ndev ls $IP /                                         # agora funciona
+$ndev put $IP --text "Codex was here." /3ds/nintendo-dev-agent/from-codex.txt --replace
+$ndev cat $IP /3ds/nintendo-dev-agent/config/pairing.bin   # deve FALHAR: PROTECTED_PATH (o arquivo de chaves é inacessível)
+$ndev pairings                                         # lista este console
+```
+**Testes de rejeição (devem FALHAR):**
+- Aperte **Y** de novo e rode `$ndev pair $IP` digitando um código **errado**: `UNAUTHORIZED`. Cinco erros fecham a janela.
+- Feche o agente (START) e abra de novo: o pareamento **persiste** (`Loaded 1 paired computer(s)` no log) e `ndev ls` continua funcionando sem parear.
+- **SELECT duas vezes** no 3DS: `Auth: required - 0 paired`; `ndev ls` passa a dar `rejected the stored pairing key ... press Y ... ndev pair`.
+- No Claude Code/Codex: peça para listar o SD do 3DS. Sem pareamento o modelo deve dizer que **você** precisa parear (ele não tem ferramenta para isso).
+**Coletar:** a tela superior durante o pareamento (foto; **apague a foto depois** — ela mostra o código, que só vale 2 min), o `agent.log`, e os tempos de `ndev pair` e do primeiro `ndev ls` (o pareamento grava no SD).
+

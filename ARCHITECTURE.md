@@ -54,7 +54,7 @@ Faz só: rede, FS, info do aparelho, responder comandos, aplicar política local
 - **`agent/common` (C99, sem STL, sem malloc no caminho quente):** parser/encoder de frames, TLV, dispatcher de comandos, normalização e política de paths, SHA-256/HMAC, máquina de estados de transferência com **orçamento por chamada** (`ndp_step(budget)` não-bloqueante). Buffers estáticos. Isso serve 3DS, DSi (4 MiB de RAM, devkitARM/libnds/dswifi) e Switch (libnx) sem reescrever.
 - **`agent/3ds`:** implementa a interface de plataforma: `net_*` (soc:u, sockets não-bloqueantes+`poll`), `fs_*` (POSIX sobre `sdmc:`), `sysinfo_*`, `ui_*` (console libctru — sem ImGui), `config_*`, `time`. Thread de rede separada do main loop de UI/HID (padrão do ftpd), com ring buffer de log/atividade protegido por mutex.
 - **`agent/host`:** mesma `common` compilada no Mac com backends POSIX. Serve para: testes unitários do protocolo e política; agente falso para o Bridge; CI sem hardware. (Equivalente ao alvo Linux do ftpd.)
-- Tela superior: status/IP/porta/modo/versões; inferior: atividade recente. START = sair, SELECT = alternar tela/log, X = configurações, Y = pairing. UI simples primeiro.
+- Tela superior: status/IP/porta/modo/versões; inferior: atividade recente. START = sair, X = alternar modo, Y = abrir/fechar a janela de pareamento, SELECT×2 = esquecer todos os pareamentos. UI simples primeiro.
 
 ### 3.2 Bridge (no computador)
 Monorepo TypeScript:
@@ -108,18 +108,20 @@ Mac = HMAC-SHA256(chave_sessão, `contador_de_frame(u64) ‖ cabeçalho ‖ payl
 1. Bridge → `HELLO {protocol_min=1, protocol_max=1, bridge_name, client_nonce[16]}`
 2. Agent → `HELLO {protocol=1, platform="3ds", agent_version, device_nonce[16], auth="required|paired|none", mode, max_frame}`
 3. Sem versão em comum → `ERR UNSUPPORTED_PROTOCOL` e fecha (nunca quebra silenciosamente).
-4. **Pairing** (primeira vez): usuário aperta Y no 3DS → mostra código de 16 caracteres Base32 (80 bits, gerado com `PS_GenerateRandomBytes`); digita no Bridge (`ndev pair`). Esse segredo é a **PSK de longo prazo**, gravada nos dois lados (`paired_clients`). Comandos `PAIR_BEGIN/PAIR_CONFIRM` só são aceitos enquanto a tela de pairing estiver aberta.
-5. Sessão: chave_sessão = HMAC(PSK, `client_nonce ‖ device_nonce`); o Bridge prova posse com `AUTH {proof}` antes de qualquer comando que não seja HELLO/PAIR.
+4. **Pairing** (primeira vez; implementado na v0.5.0, especificação exata em [`docs/protocol/ndp-v1.md`](docs/protocol/ndp-v1.md) §4): a pessoa aperta **Y** no 3DS → o console gera 80 bits com `PS_GenerateRandomBytes` (sem fallback fraco: sem RNG seguro, não pareia) e mostra `XXXX-XXXX-XXXX-XXXX` **só na tela superior** (nunca no log, que o protocolo consegue ler) por 120 s; a pessoa digita o código no Bridge (`ndev pair <ip>`, exige terminal interativo). O código **nunca trafega**: o Bridge deriva `PSK = SHA-256("NDP-PSK-v1" ‖ código)` e envia só uma prova HMAC (`PAIR`). Cada abertura da janela pareia **um** computador (até 4) e fecha; 5 provas erradas fecham a janela e a conexão.
+5. Sessão: `AUTH {key_id, proof}` prova a posse da PSK; `chave_sessão = HMAC(PSK, "session" ‖ cn ‖ dn)`; depois do AUTH **todo frame nas duas direções é selado** (HMAC-16 com contador por direção: sem MAC, MAC errado, adulteração ou replay ⇒ a conexão cai sem resposta). Antes do AUTH só HELLO/PAIR/AUTH são aceitos.
 
-Ressalvas de segurança (a discutir — você pediu não guardar segredo sem discutir): a PSK fica em texto no SD do console (mesmo domínio de confiança de quem tem o cartão); o canal **não é criptografado** (TLS no 3DS exigiria portar mbedtls, custo alto) — só autenticado e íntegro; então dados de arquivos são visíveis na LAN. Alternativa futura: ChaCha20-Poly1305 sobre a chave de sessão.
+Onde ficam os segredos: no console, `/3ds/nintendo-dev-agent/config/pairing.bin` (com checksum; pasta que **nenhum** comando do protocolo lê ou escreve); no computador, `~/.config/nintendo-dev/keys.json` (modo 0600, ou `$NDEV_KEYS_FILE`), indexado pelo `device_id` do console (o IP muda por DHCP). **SELECT duas vezes** no console apaga todos os pareamentos; `ndev unpair` apaga o do computador. O servidor MCP **não expõe nenhuma ferramenta de pareamento** ao modelo.
+
+Limites honestos: o canal é **autenticado e íntegro, mas não criptografado** (o conteúdo dos arquivos é visível na LAN; TLS exigiria portar mbedtls). Um agente de IA com shell **no mesmo usuário do computador** consegue ler `keys.json` — o pareamento protege contra outros aparelhos da rede e contra quem só tem acesso à LAN, não contra software que já roda como você (esse já tem o MCP). O que ele continua sem poder fazer é mudar as pastas liberadas ou o modo: isso só pelo console. Alternativa futura: ChaCha20-Poly1305 sobre a chave de sessão.
 
 ### 4.3 Comandos (IDs e semântica)
 | ID | Nome | Modo mínimo | Notas |
 |---|---|---|---|
 | 0x0001 | HELLO | — | acima |
 | 0x0002 | PING | — | eco de `nonce`; mede RTT |
-| 0x0003/4 | PAIR_BEGIN / PAIR_CONFIRM | — | só com tela de pairing aberta |
-| 0x0005 | AUTH | — | prova de posse |
+| 0x0004 | PAIR | — | só com a janela de pareamento aberta (Y no console) |
+| 0x0005 | AUTH | — | prova de posse; depois dele todos os frames são selados |
 | 0x0010 | DEVICE_INFO | READ_ONLY | ver 4.4 |
 | 0x0020 | FS_LIST | READ_ONLY | paginado (`cursor`, ≤N entradas por RES) |
 | 0x0021 | FS_STAT | READ_ONLY | |
@@ -167,9 +169,9 @@ Paths absolutos, `/`, UTF-8, relativos à raiz do SD; a normalização rejeita `
 - **Somente SD.** O agent monta apenas `sdmc:`. NAND (CTR/TWL NAND, saves de sistema) está **fora do escopo**: escrever pode brickar e ler expõe dados únicos do console a um LLM. Se um dia for desejado: raiz separada, somente leitura, modo `FULL` + confirmação no console.
 
 ## 5. Segurança
-- **Build de desenvolvimento (decisão do usuário, 2026-09-24):** enquanto o projeto não for distribuído e o pareamento não existir, o agente abre em `DEVELOPMENT` (escrita só em `/3ds/nintendo-dev-agent`). Risco aceito: qualquer aparelho da LAN pode escrever nessa pasta com o modo ligado. **Antes de qualquer distribuição:** trocar `AGENT_START_MODE` para `NDP_MODE_READ_ONLY` (`agent/3ds/source/main.c`) e implementar o pareamento.
+- **Build de desenvolvimento (decisão do usuário, 2026-09-24):** enquanto o projeto não for distribuído, o agente abre em `DEVELOPMENT` (escrita só em `/3ds/nintendo-dev-agent`). Desde a v0.5.0 o **pareamento é obrigatório** (`AGENT_AUTH_REQUIRED=1`), então só computadores pareados escrevem. **Antes de qualquer distribuição:** trocar `AGENT_START_MODE` para `NDP_MODE_READ_ONLY` (`agent/3ds/source/main.c`).
 - Modos: `READ_ONLY` (padrão; nenhuma escrita) → `DEVELOPMENT` (escrita só em `write_roots`) → `FULL` (reservado). Trocar modo só pelo console (botão) ou config no SD — nunca por comando remoto.
-- Não aceitar conexão sem pairing; limite de 1 conexão; timeouts em todo estágio; contagem de falhas de AUTH com backoff.
+- Nenhum comando (além de HELLO/PAIR/AUTH) sem AUTH; limite de 1 conexão; timeouts em todo estágio; 5 falhas de AUTH/PAIR derrubam a conexão (e fecham a janela de pareamento).
 - **UI/API local:** escuta só em `127.0.0.1`; valida `Host` e `Origin` (defesa contra DNS rebinding e páginas maliciosas que chamem `localhost`); token por sessão; sem CORS aberto. Acesso de outros dispositivos da LAN (ex.: celular) só como opt-in explícito, com token.
 - Prompt injection: logs, dumps e arquivos do SD entram no contexto do LLM como **dados**; as descrições das tools dizem isso, e o Bridge marca saídas de arquivo como conteúdo não confiável.
 - Toda ação vai para o **audit log** do Bridge (quem, o quê, path, resultado, hash).
@@ -257,7 +259,7 @@ GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imag
 | **M2** *(D)* | `DEVICE_INFO` | `ndev info` mostra modelo, IP, SD, memória |
 | **M3** ✔ | `FS_LIST`, `FS_STAT` | validado no New 3DS (`ndev ls`) |
 | **M4** ✔ | `FS_READ` em streaming | `cat test.txt` = "Hello from Nintendo 3DS" no 3DS real; ~1 MiB/s |
-| **M5** ◐ | `FS_WRITE` atômico + `FS_MKDIR` + modos + proteção de paths ✔ (v0.3.0, testes no Mac); **pareamento/HMAC ⏳** | `from-codex.txt` no SD real (a testar) |
+| **M5** ◐ | `FS_WRITE` atômico + `FS_MKDIR` + modos + proteção de paths ✔ (v0.3.0, testes no Mac); **pareamento/HMAC ✔ (v0.5.0, testes no Mac; a validar no console)** | `from-codex.txt` no SD real (validado sem auth na v0.4.0) |
 | **M6** ✔ | Servidor MCP (stdio) com 12 ferramentas, descoberta automática, auditoria e sandbox local ([`docs/mcp.md`](docs/mcp.md)) | 13 testes ponta a ponta no Mac; **pendente:** teste com modelo real e com o console real |
 | M7 | `fs_upload/download`, `deploy_homebrew` (hash, backup, temp→rename; estudar `3dslink` antes) | build `.3dsx` do TMC3DS enviado e substituído |
 | M8 | Logs e crashes (+ parser Luma) | "analise o último crash" |

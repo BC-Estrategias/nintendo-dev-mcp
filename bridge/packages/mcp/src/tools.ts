@@ -45,7 +45,7 @@ export function describeError(e: unknown, host: string | null): string {
       HASH_MISMATCH: "The content received by the console did not match; nothing was written. Retry.",
       BUSY: "The console is busy with another transfer. Retry in a moment.",
       NO_SPACE: "The SD card is full.",
-      UNAUTHORIZED: "The console requires pairing.",
+      UNAUTHORIZED: "This computer is not (or no longer) paired with the console. Pairing cannot be done by the assistant: ask the user to press Y on the console and run `ndev pair <host>` in their own terminal, then retry.",
     };
     const hint = hints[e.statusName] ?? "";
     // the device's own detail is only worth showing when the hint does not already say the same thing
