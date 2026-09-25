@@ -81,6 +81,10 @@ export interface HelloInfo {
   maxFrame: number;
 }
 
+/** Operations that create/commit things on the SD card can legitimately take several seconds. */
+const SLOW_FS_TIMEOUT_MS = 30_000;
+const WRITE_COMMIT_TIMEOUT_MS = 60_000;
+
 const TRANSIENT_CONNECT_CODES = new Set(["EHOSTUNREACH", "EHOSTDOWN", "ENETUNREACH", "ETIMEDOUT"]);
 
 /** True for connect failures worth retrying. ECONNREFUSED (nothing listening) is deliberately not one. */
@@ -246,9 +250,9 @@ export class NdpClient {
   }
 
   /** Waits for the RES that answers `id`; an ERR frame rejects with NdpRemoteError. */
-  async #awaitResponse(id: number): Promise<Frame> {
+  async #awaitResponse(id: number, timeoutMs: number = this.#requestTimeoutMs): Promise<Frame> {
     for (;;) {
-      const f = await this.#nextFrame(this.#requestTimeoutMs);
+      const f = await this.#nextFrame(timeoutMs);
       if (f.header.requestId !== id) continue; // stale frame from an abandoned request
       if (f.header.kind === Kind.ERR) throw this.#remoteError(f);
       if (f.header.kind !== Kind.RES)
@@ -263,8 +267,8 @@ export class NdpClient {
   }
 
   /** Sends a REQ and resolves with the matching RES; an ERR frame rejects with NdpRemoteError. */
-  request(command: number, payload: Uint8Array = new Uint8Array(0)): Promise<Frame> {
-    return this.#exclusive(() => this.#awaitResponse(this.#sendRequest(command, payload)));
+  request(command: number, payload: Uint8Array = new Uint8Array(0), timeoutMs?: number): Promise<Frame> {
+    return this.#exclusive(() => this.#awaitResponse(this.#sendRequest(command, payload), timeoutMs));
   }
 
   async hello(): Promise<HelloInfo> {
@@ -408,7 +412,8 @@ export class NdpClient {
   }
 
   async mkdir(path: string): Promise<void> {
-    await this.request(Command.FS_MKDIR, encodeTlv([[Tag.PATH, str(normalizePath(path))]]));
+    // Measured on a real 3DS: creating a directory takes ~5.7 s (files take ~85 ms), so wait generously.
+    await this.request(Command.FS_MKDIR, encodeTlv([[Tag.PATH, str(normalizePath(path))]]), SLOW_FS_TIMEOUT_MS);
   }
 
   /**
@@ -433,7 +438,7 @@ export class NdpClient {
     return this.#exclusive(async () => {
       const t0 = performance.now();
       const id = this.#sendRequest(Command.FS_WRITE, payload);
-      const ready = parseTlv((await this.#awaitResponse(id)).payload); // ERR here: nothing was created
+      const ready = parseTlv((await this.#awaitResponse(id, SLOW_FS_TIMEOUT_MS)).payload); // ERR here: nothing was created
       const maxChunk = Math.min(ready.u32(Tag.MAX_CHUNK) ?? DEFAULT_CHUNK, DEFAULT_MAX_FRAME);
       const chunkSize = Math.max(MIN_CHUNK, Math.min(opts.chunk ?? DEFAULT_CHUNK, maxChunk));
       let sent = 0;
@@ -468,7 +473,17 @@ export class NdpClient {
       if (err) throw err;
       await this.#writeFrame(encodeFrame({ kind: Kind.END, requestId: id, command: Command.FS_WRITE }));
 
-      const res = parseTlv((await this.#awaitResponse(id)).payload);
+      let final: Frame;
+      try {
+        final = await this.#awaitResponse(id, WRITE_COMMIT_TIMEOUT_MS);
+      } catch (e) {
+        if (e instanceof NdpTransportError && e.code === undefined)
+          throw new NdpTransportError(
+            `the device did not confirm the upload of ${path} within ${WRITE_COMMIT_TIMEOUT_MS} ms — the file may or may not have been written; check it with 'ndev stat'`,
+          );
+        throw e;
+      }
+      const res = parseTlv(final.payload);
       const written = res.u64(Tag.WRITTEN);
       const digest = res.first(Tag.SHA256);
       if (written === undefined || !digest || digest.length !== 32)

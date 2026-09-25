@@ -86,6 +86,26 @@ Hash SHA-256 conferido contra o agente em todos os downloads.
 2. **Listar custa ~10 ms por entrada** por causa do `stat` que traz o tamanho. Uma pasta com 500 arquivos levaria ~5 s. Próxima melhoria: tornar o tamanho opcional (`want_size`) e obter o tipo sem `stat` quando o `readdir` informar (não verificado se o `sdmc:` do libctru preenche `d_type`).
 3. O `agent.log` pode ser lido remotamente e reflete o instante atual (flush antes de ler a pasta do agente).
 
+## 2026-09-25 — M5 (escrita) no hardware, agente v0.3.0
+
+**Aceitação:** `ndev put <ip> --text "Codex was here." /3ds/nintendo-dev-agent/from-codex.txt` criou o arquivo (15 bytes); `ndev cat` devolveu exatamente o mesmo texto. Sem sobrescrita silenciosa (`EXISTS`, conteúdo intacto); `--replace --backup` gerou `from-codex.txt.bak` com a versão anterior; nenhum `*.ndp-tmp`/`*.ndp-old` sobrou.
+
+| Operação (tempo dentro do agente, do `agent.log`) | Resultado |
+|---|---|
+| escrita de arquivo novo pequeno (temp+rename) | **~85–93 ms**, estável (10 amostras, inclusive após 60 s parado) |
+| substituição com rename duplo + remove | 140 ms |
+| `FS_STAT` / `FS_LIST` (6 entradas) / leitura de arquivo pequeno | ~12 ms / 46 ms / ~20 ms |
+| **`FS_MKDIR`** | **~5,75 s, determinístico** (5744, 5757, 5749, 5770 ms; 4 de 4) |
+| **primeira escrita da sessão** (`from-codex.txt`) | **5815 ms**, não reproduzida depois (as 10 seguintes: ~85 ms) |
+
+**Achados**
+1. **`mkdir` é sempre ~5,7 s no SD deste console.** Causa **desconhecida** (o agente não discrimina qual chamada demora: `mkdir` do libctru, `stat`, sync?). Cria o diretório corretamente. A v0.3.1 passa a registrar `WARN slow <op> <ms>` para qualquer operação de SD ≥ 150 ms, para identificar a chamada.
+2. **A primeira escrita de 5,8 s (quase igual ao mkdir) é inexplicada**: não voltou a ocorrer. Hipóteses não testadas: cache/alocação do FS do console, ou o cartão. Sem evidência para escolher.
+3. **Problema real que o achado expôs (corrigido):** o Bridge desistia aos 5 s e o resultado ficava ambíguo, embora o agente concluísse e gravasse. Agora: `mkdir` espera 30 s; escrita espera 60 s pela confirmação final; se ainda assim não houver confirmação, o erro diz que o arquivo pode ou não ter sido gravado e manda conferir com `ndev stat`. Verificado no hardware: `mkdir` concluiu em 6,2 s.
+4. **O IP do 3DS mudou de um dia para o outro** (DHCP: `192.168.15.14` → `.17`; o MAC do `.14` passou a ser de outro aparelho). O Mac também mudou de IP. Achei o console varrendo a porta 6464 da /24. Isso eleva a prioridade da **descoberta automática** e de reservar IP no roteador.
+5. Ficaram arquivos de teste em `/3ds/nintendo-dev-agent/inbox/` (`t1..t5.txt`, `frio.txt`, `quente.txt`, `d1..d4/`) e `from-codex.txt(.bak)`; o agente não tem comando de remoção (por desenho) — apagar pelo cartão/outro app.
+
 ## Pendências de medição
-- Separar SD × Wi-Fi na vazão de leitura (benchmark); vazão de escrita — M5.
+- Separar SD × Wi-Fi na vazão de leitura (benchmark); **vazão de escrita de arquivo grande**.
+- Qual chamada de SD causa o `mkdir` de ~5,7 s e a primeira escrita de 5,8 s (v0.3.1 registra `WARN slow …`).
 - Custo de SHA-256 no ARM11.

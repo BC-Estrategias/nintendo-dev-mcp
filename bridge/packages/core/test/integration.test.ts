@@ -26,7 +26,7 @@ suite("host agent over TCP", () => {
       const info = await c.hello();
       assert.equal(info.protocol, 1);
       assert.equal(info.platform, "host");
-      assert.equal(info.agentVersion, "0.3.0");
+      assert.equal(info.agentVersion, "0.3.1");
       assert.equal(info.mode, "READ_ONLY");
       assert.equal(info.auth, "none");
       assert.equal(info.maxFrame, DEFAULT_MAX_FRAME);

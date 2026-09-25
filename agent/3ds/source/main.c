@@ -48,21 +48,92 @@ static ndp_server g_srv; /* ~135 KB of buffers inside: static, not on the stack 
 static ndp_posix_fs_ctx g_fs_ctx;
 static ndp_fs_ops g_fs_base, g_fs;
 
+/* Any SD operation slower than this is logged (measured on hardware: mkdir takes ~5.7 s, a small
+ * file write ~85 ms; the log shows which call stalls). */
+#define SLOW_FS_MS 150
+static uint64_t now_ms(void *ctx);
+static void slow_check(const char *op, const char *path, uint64_t t0) {
+  uint64_t d = now_ms(NULL) - t0;
+  if (d >= SLOW_FS_MS) alog("WARN slow %s %lu ms %s", op, (unsigned long)d, path ? path : "");
+}
+
 static void flush_if_own_folder(const char *path) {
   static const char own[] = "/3ds/nintendo-dev-agent";
   if (strncmp(path, own, sizeof own - 1) == 0) alog_flush();
 }
 static int fs_stat(void *ctx, const char *path, ndp_fs_stat *st) {
+  uint64_t t0;
+  int rc;
   flush_if_own_folder(path);
-  return g_fs_base.stat(ctx, path, st);
+  t0 = now_ms(NULL);
+  rc = g_fs_base.stat(ctx, path, st);
+  slow_check("stat", path, t0);
+  return rc;
 }
 static int fs_dir_open(void *ctx, const char *path, void **dir) {
+  uint64_t t0;
+  int rc;
   flush_if_own_folder(path);
-  return g_fs_base.dir_open(ctx, path, dir);
+  t0 = now_ms(NULL);
+  rc = g_fs_base.dir_open(ctx, path, dir);
+  slow_check("dir_open", path, t0);
+  return rc;
 }
 static int fs_file_open(void *ctx, const char *path, void **file) {
+  uint64_t t0;
+  int rc;
   flush_if_own_folder(path);
-  return g_fs_base.file_open(ctx, path, file);
+  t0 = now_ms(NULL);
+  rc = g_fs_base.file_open(ctx, path, file);
+  slow_check("file_open", path, t0);
+  return rc;
+}
+static long fs_file_read(void *ctx, void *file, void *buf, size_t n) {
+  uint64_t t0 = now_ms(NULL);
+  long r = g_fs_base.file_read(ctx, file, buf, n);
+  slow_check("file_read", NULL, t0);
+  return r;
+}
+static void fs_file_close(void *ctx, void *file) {
+  uint64_t t0 = now_ms(NULL);
+  g_fs_base.file_close(ctx, file);
+  slow_check("file_close", NULL, t0);
+}
+static int fs_mkdir(void *ctx, const char *path) {
+  uint64_t t0 = now_ms(NULL);
+  int rc = g_fs_base.mkdir(ctx, path);
+  slow_check("mkdir", path, t0);
+  return rc;
+}
+static int fs_file_create(void *ctx, const char *path, void **file) {
+  uint64_t t0 = now_ms(NULL);
+  int rc = g_fs_base.file_create(ctx, path, file);
+  slow_check("file_create", path, t0);
+  return rc;
+}
+static long fs_file_write(void *ctx, void *file, const void *buf, size_t n) {
+  uint64_t t0 = now_ms(NULL);
+  long r = g_fs_base.file_write(ctx, file, buf, n);
+  slow_check("file_write", NULL, t0);
+  return r;
+}
+static int fs_file_sync(void *ctx, void *file) {
+  uint64_t t0 = now_ms(NULL);
+  int rc = g_fs_base.file_sync(ctx, file);
+  slow_check("file_sync", NULL, t0);
+  return rc;
+}
+static int fs_rename(void *ctx, const char *from, const char *to) {
+  uint64_t t0 = now_ms(NULL);
+  int rc = g_fs_base.rename(ctx, from, to);
+  slow_check("rename", to, t0);
+  return rc;
+}
+static int fs_remove(void *ctx, const char *path) {
+  uint64_t t0 = now_ms(NULL);
+  int rc = g_fs_base.remove_file(ctx, path);
+  slow_check("remove", path, t0);
+  return rc;
 }
 
 static u32 *g_soc_buf = NULL;
@@ -313,6 +384,14 @@ int main(void) {
     g_fs.stat = fs_stat;
     g_fs.dir_open = fs_dir_open;
     g_fs.file_open = fs_file_open;
+    g_fs.file_read = fs_file_read;
+    g_fs.file_close = fs_file_close;
+    g_fs.mkdir = fs_mkdir;
+    g_fs.file_create = fs_file_create;
+    g_fs.file_write = fs_file_write;
+    g_fs.file_sync = fs_file_sync;
+    g_fs.rename = fs_rename;
+    g_fs.remove_file = fs_remove;
     cfg.fs = &g_fs; /* default policy: read everything except the agent's config; no writes */
   }
   memset(&plat, 0, sizeof plat);
