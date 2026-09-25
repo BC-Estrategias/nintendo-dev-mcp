@@ -193,18 +193,19 @@ Uma `/` final única é removida (exceto na raiz `/`). O resultado normalizado �
 **Comparação de prefixo** (raízes/zonas): por **componente**, com dobra de caixa **somente ASCII** (FAT é case-insensitive; para não-ASCII o agent **falha fechado**: só considera igual se os bytes forem idênticos). `/luma` cobre `/luma` e `/luma/x`, **não** `/lumax`.
 
 ## 11. Política de acesso
-Entrada: `mode` (`READ_ONLY` < `DEVELOPMENT` < `FULL`), `op` (`read`|`write`), path, e a configuração `{read_roots, write_roots, never_read, never_write}` (listas de paths normalizados).
+Entrada: `mode` (`READ_ONLY` < `DEVELOPMENT` < `FULL`), `op` (`read`|`write`), path, e a configuração `{read_roots, write_roots, never_read, never_write, write_except}` (listas de paths normalizados; `write_except` é opcional).
 
 Avaliação, na ordem (a primeira que falha encerra):
 1. path inválido → `PATH_INVALID`.
 2. `op = write` e `mode = READ_ONLY` → `FORBIDDEN_MODE`.
-3. path em alguma `never_*` da operação → `PROTECTED_PATH`.
+3. path em alguma `never_*` da operação → `PROTECTED_PATH`. **Exceção de escrita:** um path dentro de uma zona `never_write` Z é liberado se existir uma `write_except` E tal que o path está dentro de E e E é sub-pasta **própria** de Z (E ≠ Z). Uma zona mais funda dentro de E protege de novo.
 4. path fora de todas as raízes (`read_roots` / `write_roots`) → `PROTECTED_PATH`.
 5. caso contrário → `OK`.
 
 Padrões: `read_roots = ["/"]`; `write_roots = ["/3ds/nintendo-dev-agent"]`;
 `never_write = ["/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private", "/3ds/nintendo-dev-agent/config"]`;
-`never_read = ["/3ds/nintendo-dev-agent/config"]` (política e chaves).
+`never_read = ["/3ds/nintendo-dev-agent/config"]` (política e chaves);
+`write_except = ["/luma/plugins", "/luma/titles"]` (plugins 3GX e substituição de arquivos de jogo/layeredfs — o que um desenvolvedor edita no Luma; o resto de `/luma`, como `config.ini`, `payloads` e `sysmodules`, pode impedir o console de ligar e continua protegido).
 Um root ou zona pode ser um arquivo (`/boot.firm`). A configuração só é alterada com confirmação física no console (ver `ARCHITECTURE.md`); o protocolo NÃO tem comando para isso.
 
 Os padrões acima são os de `ndp_policy_init_default` (e do agente de teste). **O agente do 3DS não os usa:** ele monta a política a partir da lista do dono (§11.2), cujo padrão é *só a pasta do próprio agente*.
@@ -218,7 +219,7 @@ Vetores: `traverse` em `vectors.json` (`travessível`/`visível` por configuraç
 
 ### 11.2 Lista de pastas do dono
 Quem escolhe o que é liberado é a pessoa **no console** (botão A → "Access folders"; nenhum comando do protocolo altera isto). A lista tem até **6 entradas** `{caminho normalizado, nível}`, nível `READ` ou `WRITE` (`WRITE` implica `READ`), e vira a política assim: `read_roots = [/3ds/nintendo-dev-agent] + todas as entradas`; `write_roots = [/3ds/nintendo-dev-agent] + entradas WRITE`; `never_*` = padrões (§11). A pasta do agente é sempre liberada.
-- Um nível só pode ser concedido se o caminho não estiver numa zona protegida: `READ` fora de `never_read`, `WRITE` fora de `never_write` (senão `PROTECTED_PATH`). Conceder `WRITE` em `/` é possível, e as zonas `never_write` continuam valendo dentro dele.
+- Um nível só pode ser concedido se o caminho não estiver numa zona protegida: `READ` fora de `never_read`, `WRITE` fora de `never_write` (exceto o que `write_except` libera; senão `PROTECTED_PATH`). Conceder `WRITE` em `/` é possível, e as zonas `never_write` continuam valendo dentro dele.
 - Ciclo do botão Y numa pasta: nenhum → leitura → leitura+escrita → nenhum, pulando níveis já concedidos por uma pasta-mãe e os proibidos.
 - Arquivo `/3ds/nintendo-dev-agent/config/access.bin`: `"NDPA"`, versão 1, `count u8`, 2 bytes zero, depois `count × {nível u8, len u8, caminho}` e o SHA-256 de tudo antes. Qualquer inconsistência (checksum, nível, caminho não canônico, duplicado, zona proibida) ⇒ **lista vazia** (só a pasta do agente): falha fechada. Escrita atômica (`.tmp` → verificar → `.bak` → rename). Vetores: `access` em `vectors.json` (operações, política resultante e os bytes do arquivo).
 
