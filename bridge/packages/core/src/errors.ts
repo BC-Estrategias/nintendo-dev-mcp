@@ -28,8 +28,11 @@ export class NdpRemoteError extends Error {
 
 /** Local problem: timeout, connection lost, bad response shape. */
 export class NdpTransportError extends Error {
-  constructor(message: string) {
+  /** Node/system error code (ECONNREFUSED, EHOSTUNREACH, ...) when the failure came from the socket. */
+  readonly code: string | undefined;
+  constructor(message: string, code?: string) {
     super(message);
     this.name = "NdpTransportError";
+    this.code = code;
   }
 }

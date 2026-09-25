@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   Command, DEFAULT_MAX_FRAME, Kind, NdpClient, NdpRemoteError, NdpTransportError, Status, Tag, encodeFrame,
-  encodeTlv,
+  encodeTlv, isTransientConnectError,
 } from "../src/index.ts";
 
 const AGENT =
@@ -57,7 +57,7 @@ suite("host agent over TCP", () => {
       const info = await c.hello();
       assert.equal(info.protocol, 1);
       assert.equal(info.platform, "host");
-      assert.equal(info.agentVersion, "0.1.0");
+      assert.equal(info.agentVersion, "0.1.1");
       assert.equal(info.mode, "READ_ONLY");
       assert.equal(info.auth, "none");
       assert.equal(info.maxFrame, DEFAULT_MAX_FRAME);
@@ -196,8 +196,18 @@ it("idle clients are dropped after the idle timeout", async () => {
   }
 });
 
-it("connecting to a closed port fails with a clear error", async () => {
-  await assert.rejects(NdpClient.connect({ host: "127.0.0.1", port: 1, connectTimeoutMs: 1000 }), NdpTransportError);
+it("connecting to a closed port fails fast (ECONNREFUSED is not retried)", async () => {
+  const t0 = Date.now();
+  await assert.rejects(
+    NdpClient.connect({ host: "127.0.0.1", port: 1, connectTimeoutMs: 1000 }),
+    (e: unknown) => e instanceof NdpTransportError && e.code === "ECONNREFUSED",
+  );
+  assert.ok(Date.now() - t0 < 200, "no retry pauses for a refused connection");
+});
+
+it("transient connect errors are classified for retry", () => {
+  for (const c of ["EHOSTUNREACH", "EHOSTDOWN", "ENETUNREACH", "ETIMEDOUT"]) assert.equal(isTransientConnectError(c), true, c);
+  for (const c of ["ECONNREFUSED", "EACCES", undefined]) assert.equal(isTransientConnectError(c), false, String(c));
 });
 
 it("request times out when the agent never answers", async () => {

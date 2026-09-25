@@ -16,8 +16,8 @@ Cada marco que toca o console tem um roteiro aqui. Marque o que passou e **cole 
 ### 2. Abrir e conferir a tela
 | Onde | Esperado |
 |---|---|
-| Superior | `Nintendo Dev Agent  v0.1.0`, `Protocol 1`, `Status: ONLINE` (verde), `IP: 192.168.x.x`, `Port: 6464`, `Bridge: not connected`, `Mode: READ_ONLY` |
-| Inferior | linhas `Nintendo Dev Agent v0.1.0…`, `Console: New 3DS family`, `acInit/psInit/ndmuInit: 0x00000000`, `Wi-Fi connected`, `Network services ready`, `Listening on 192.168.x.x:6464` |
+| Superior | `Nintendo Dev Agent  v0.1.1`, `Protocol 1`, `Status: ONLINE` (verde), `IP: 192.168.x.x`, `Port: 6464`, `Bridge: not connected`, `Mode: READ_ONLY` |
+| Inferior | linhas `Nintendo Dev Agent v0.1.1…`, `Console: New 3DS family`, `acInit/psInit/ndmuInit: 0x00000000`, `Wi-Fi connected`, `Network services ready`, `Listening on 192.168.x.x:6464` |
 
 Se aparecer `NETWORK ERROR` ou algum `0x…` diferente de zero, **pare e me mande a tela** (o código é o diagnóstico).
 
@@ -25,7 +25,7 @@ Se aparecer `NETWORK ERROR` ou algum `0x…` diferente de zero, **pare e me mand
 ```bash
 node bridge/packages/cli/src/main.ts ping <IP_DO_3DS> -c 10
 ```
-Esperado: `Agent: 3ds  v0.1.0  protocol 1  mode READ_ONLY  auth none  max_frame 65536`, dez linhas `PONG`, e a linha `min/avg/max`. **Anote os tempos** (é a nossa primeira medida de latência real). Na tela inferior devem aparecer `[CONNECT]`, `[REQ n] HELLO`, `[OK n]`, `[REQ n] PING`…; a superior mostra `Bridge: CONNECTED`, depois volta a `not connected`.
+Esperado: `Agent: 3ds  v0.1.1  protocol 1  mode READ_ONLY  auth none  max_frame 65536`, dez linhas `PONG`, e a linha `min/avg/max`. **Anote os tempos** (é a nossa primeira medida de latência real). Na tela inferior devem aparecer `[CONNECT]`, `[REQ n] HELLO`, `[OK n]`, `[REQ n] PING`…; a superior mostra `Bridge: CONNECTED`, depois volta a `not connected`.
 
 ### 4. Robustez
 - [ ] Rode o ping duas vezes seguidas (reconexão).

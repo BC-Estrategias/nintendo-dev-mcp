@@ -25,6 +25,14 @@
 #define C_RED "\x1b[31;1m"
 #define C_CYAN "\x1b[36;1m"
 
+/* Drawing blocks on vblank (~16-20 ms) and would delay reading the next request, so the UI is
+ * redrawn at most every DRAW_MIN_MS (measured on hardware: ~20 ms added per back-to-back request
+ * when redrawing on every request). */
+#define DRAW_MIN_MS 250
+#define DRAW_MAX_MS 1000
+#define BOT_COLS 39
+#define BOT_ROWS 27
+
 static PrintConsole g_top, g_bot;
 static ndp_server g_srv; /* ~135 KB of buffers inside: static, not on the stack */
 
@@ -171,9 +179,27 @@ static void hms(char *out, size_t cap, uint64_t ms) {
   snprintf(out, cap, "%02lu:%02lu:%02lu", s / 3600, (s / 60) % 60, s % 60);
 }
 
+/* Rows a log line occupies on the bottom console: BOT_COLS, then 2-space-indented continuations. */
+static int wrapped_rows(const char *s) {
+  int len = (int)strlen(s);
+  if (len <= BOT_COLS) return 1;
+  return 1 + (len - BOT_COLS + (BOT_COLS - 2) - 1) / (BOT_COLS - 2);
+}
+
+static void print_wrapped(const char *s) {
+  int len = (int)strlen(s), pos = 0, first = 1;
+  while (pos < len || first) {
+    int width = first ? BOT_COLS : BOT_COLS - 2;
+    if (!first) printf("  ");
+    printf("%.*s\n", width, s + pos);
+    pos += width;
+    first = 0;
+  }
+}
+
 static void draw(uint64_t now) {
   char up[16];
-  int n, i, shown;
+  int n, i, rows;
   const char *color, *status;
 
   if (g_listening) { color = C_GREEN; status = "ONLINE"; }
@@ -205,9 +231,13 @@ static void draw(uint64_t now) {
   consoleSelect(&g_bot);
   consoleClear();
   printf(C_CYAN "Recent activity" C_RESET "\n\n");
-  shown = 27;
-  for (n = 0; n < shown && alog_get(n); n++) {}
-  for (i = n - 1; i >= 0; i--) printf("%.39s\n", alog_get(i));
+  rows = 0;
+  for (n = 0; alog_get(n); n++) {
+    int r = wrapped_rows(alog_get(n));
+    if (rows + r > BOT_ROWS) break;
+    rows += r;
+  }
+  for (i = n - 1; i >= 0; i--) print_wrapped(alog_get(i));
 
   gfxFlushBuffers();
   gfxSwapBuffers();
@@ -218,7 +248,7 @@ int main(void) {
   ndp_agent_config cfg;
   ndp_server_platform plat;
   uint64_t last_draw = 0;
-  bool is_new3ds = false;
+  bool draw_pending = false, is_new3ds = false;
   Result r;
 
   osSetSpeedupEnable(true);
@@ -275,9 +305,11 @@ int main(void) {
     }
 
     now = now_ms(NULL);
-    if (changed || alog_dirty() || now - last_draw >= 1000) {
+    if (changed || alog_dirty()) draw_pending = true;
+    if ((draw_pending && now - last_draw >= DRAW_MIN_MS) || now - last_draw >= DRAW_MAX_MS) {
       alog_clear_dirty();
       draw(now);
+      draw_pending = false;
       last_draw = now;
     }
   }

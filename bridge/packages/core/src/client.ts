@@ -9,7 +9,10 @@ import { encodeTlv, parseTlv, str, u16, u64 } from "./tlv.ts";
 export interface ConnectOptions {
   host: string;
   port?: number;
+  /** Per-attempt timeout. */
   connectTimeoutMs?: number;
+  /** Attempts for transient failures (host unreachable / timeout). ECONNREFUSED is never retried. Default 3. */
+  attempts?: number;
   requestTimeoutMs?: number;
   bridgeName?: string;
 }
@@ -22,6 +25,13 @@ export interface HelloInfo {
   auth: string;
   mode: Mode;
   maxFrame: number;
+}
+
+const TRANSIENT_CONNECT_CODES = new Set(["EHOSTUNREACH", "EHOSTDOWN", "ENETUNREACH", "ETIMEDOUT"]);
+
+/** True for connect failures worth retrying. ECONNREFUSED (nothing listening) is deliberately not one. */
+export function isTransientConnectError(code: string | undefined): boolean {
+  return code !== undefined && TRANSIENT_CONNECT_CODES.has(code);
 }
 
 interface Waiter {
@@ -55,7 +65,24 @@ export class NdpClient {
     socket.on("close", () => this.#fail(new NdpTransportError("connection closed")));
   }
 
-  static connect(opts: ConnectOptions): Promise<NdpClient> {
+  /**
+   * Connects, retrying transient failures with a growing pause. Measured on a real 3DS: the first
+   * connection after a quiet period can fail with EHOSTUNREACH (ARP not resolved while the console's
+   * Wi-Fi radio is in power-save) and succeed on the next attempt.
+   */
+  static async connect(opts: ConnectOptions): Promise<NdpClient> {
+    const attempts = Math.max(1, opts.attempts ?? 3);
+    for (let i = 1; ; i++) {
+      try {
+        return await NdpClient.#connectOnce(opts);
+      } catch (e) {
+        if (i >= attempts || !(e instanceof NdpTransportError) || !isTransientConnectError(e.code)) throw e;
+        await new Promise((r) => setTimeout(r, 250 * 2 ** (i - 1)));
+      }
+    }
+  }
+
+  static #connectOnce(opts: ConnectOptions): Promise<NdpClient> {
     const port = opts.port ?? DEFAULT_PORT;
     const timeoutMs = opts.connectTimeoutMs ?? 5000;
     return new Promise((resolve, reject) => {
@@ -63,7 +90,7 @@ export class NdpClient {
       socket.setNoDelay(true);
       const timer = setTimeout(() => {
         socket.destroy();
-        reject(new NdpTransportError(`connect to ${opts.host}:${port} timed out after ${timeoutMs} ms`));
+        reject(new NdpTransportError(`connect to ${opts.host}:${port} timed out after ${timeoutMs} ms`, "ETIMEDOUT"));
       }, timeoutMs);
       socket.once("connect", () => {
         clearTimeout(timer);
@@ -72,7 +99,7 @@ export class NdpClient {
       });
       socket.once("error", (e) => {
         clearTimeout(timer);
-        reject(new NdpTransportError(`cannot connect to ${opts.host}:${port}: ${e.message}`));
+        reject(new NdpTransportError(`cannot connect to ${opts.host}:${port}: ${e.message}`, (e as NodeJS.ErrnoException).code));
       });
     });
   }
