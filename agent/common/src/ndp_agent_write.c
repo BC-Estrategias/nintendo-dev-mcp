@@ -1,5 +1,6 @@
 /* FS_WRITE / FS_MKDIR (spec §14). Uploads go to "<path>.ndp-tmp" and replace the target only after
  * size and hash are verified, so an interrupted or corrupt transfer never damages existing files. */
+#include <stdio.h>
 #include <string.h>
 
 #include "ndp_agent_internal.h"
@@ -8,6 +9,7 @@
 #define SUFFIX_TMP ".ndp-tmp"
 #define SUFFIX_OLD ".ndp-old"
 #define SUFFIX_BAK ".bak"
+#define TRASH_NAME ".ndp-trash"
 
 static const char *wdetail(int status) {
   switch (status) {
@@ -38,6 +40,21 @@ static int with_suffix(const char *base, const char *suf, char *out, size_t cap)
 }
 
 /* Parent directory of a normalized path ("/a/b" -> "/a", "/a" -> "/"). */
+/* "<root>/.ndp-trash" ("/.ndp-trash" for the filesystem root). */
+static int trash_dir_of(const char *root, char *out, size_t cap) {
+  int n = strcmp(root, "/") == 0 ? snprintf(out, cap, "/%s", TRASH_NAME) : snprintf(out, cap, "%s/%s", root, TRASH_NAME);
+  return (n > 0 && (size_t)n < cap) ? 0 : -1;
+}
+
+/* True when `path` lies inside the trash of any write root. */
+static int in_any_trash(const ndp_agent *a, const char *path) {
+  char t[NDP_PATH_MAX + 16];
+  int i;
+  for (i = 0; i < a->policy.write_roots.count; i++)
+    if (trash_dir_of(a->policy.write_roots.entries[i], t, sizeof t) == 0 && ndp_path_inside(path, t)) return 1;
+  return 0;
+}
+
 static void parent_of(const char *path, char *out) {
   size_t n = strlen(path);
   while (n > 1 && path[n - 1] != '/') n--;
@@ -88,6 +105,7 @@ size_t ndp_agent_mkdir(ndp_agent *a, const ndp_header *req, const uint8_t *pl, u
   int rc = resolve_write_path(a, req, pl, norm, &detail);
   if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, detail, 0);
   if (strcmp(norm, "/") == 0) return ndp_agent_error(out, cap, req, NDP_ST_EXISTS, "already exists", 0);
+  if (in_any_trash(a, norm)) return ndp_agent_error(out, cap, req, NDP_ST_PROTECTED_PATH, "the trash is managed by the agent", 0);
   parent_of(norm, parent);
   rc = fs->stat(fs->ctx, parent, &st);
   if (rc != NDP_OK || !st.is_dir) return ndp_agent_error(out, cap, req, NDP_ST_NOT_FOUND, wdetail(NDP_ST_NOT_FOUND), 0);
@@ -119,6 +137,7 @@ size_t ndp_agent_write_start(ndp_agent *a, const ndp_header *req, const uint8_t 
   if (has_suffix(norm, SUFFIX_TMP) || has_suffix(norm, SUFFIX_OLD) || has_suffix(norm, SUFFIX_BAK))
     return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "reserved file name suffix", 0);
   if (strcmp(norm, "/") == 0) return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "not a file path", 0);
+  if (in_any_trash(a, norm)) return ndp_agent_error(out, cap, req, NDP_ST_PROTECTED_PATH, "the trash is managed by the agent", 0);
 
   parent_of(norm, parent);
   rc = fs->stat(fs->ctx, parent, &st);
@@ -243,4 +262,54 @@ size_t ndp_agent_upload_frame(ndp_agent *a, const ndp_header *hdr, const uint8_t
   if (a->up.received != a->up.declared)
     return fail_upload(a, hdr, out, cap, NDP_ST_BAD_REQUEST, "size mismatch: fewer bytes than declared", 0);
   return commit_upload(a, hdr, out, cap);
+}
+
+/* FS_DELETE: never removes data, only moves the item into "<write root>/.ndp-trash" (spec §14). */
+size_t ndp_agent_delete(ndp_agent *a, const ndp_header *req, const uint8_t *pl, uint8_t *out, size_t cap) {
+  const ndp_fs_ops *fs = a->cfg.fs;
+  char norm[NDP_PATH_MAX + 1], trash[NDP_PATH_MAX + 16], dest[NDP_PATH_MAX + 32], name[NDP_COMPONENT_MAX + 1];
+  const char *detail = "", *root = NULL, *slash;
+  ndp_fs_stat st;
+  ndp_tlv_w w;
+  int rc, i, n;
+  size_t best = 0;
+
+  rc = resolve_write_path(a, req, pl, norm, &detail);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, detail, 0);
+  for (i = 0; i < a->policy.write_roots.count; i++) { /* the most specific root that contains the path */
+    const char *r = a->policy.write_roots.entries[i];
+    if (ndp_path_inside(norm, r) && (root == NULL || strlen(r) > best)) { root = r; best = strlen(r); }
+  }
+  if (!root) return ndp_agent_error(out, cap, req, NDP_ST_PROTECTED_PATH, wdetail(NDP_ST_PROTECTED_PATH), 0);
+  if (strcmp(norm, root) == 0) return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "cannot delete a write root", 0);
+  if (trash_dir_of(root, trash, sizeof trash) != 0) return ndp_agent_error(out, cap, req, NDP_ST_PATH_INVALID, "path too long", 0);
+  if (in_any_trash(a, norm)) return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "already in the trash (permanent deletion is not supported)", 0);
+
+  rc = fs->stat(fs->ctx, norm, &st);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, rc == NDP_ST_NOT_FOUND ? "no such file or directory" : wdetail(rc), 0);
+
+  rc = fs->stat(fs->ctx, trash, &st);
+  if (rc == NDP_ST_NOT_FOUND) {
+    rc = fs->mkdir(fs->ctx, trash); /* on the 3DS this one call takes ~6 s, once per root */
+    if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, "could not create the trash folder", 0);
+  } else if (rc != NDP_OK || !st.is_dir) {
+    return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "the trash folder is unusable", 0);
+  }
+
+  slash = strrchr(norm, '/');
+  n = snprintf(name, sizeof name, "%s", slash + 1);
+  if (n <= 0 || (size_t)n >= sizeof name) return ndp_agent_error(out, cap, req, NDP_ST_PATH_INVALID, "name too long", 0);
+  for (i = 0; i < 1000; i++) { /* <name>, then <name>.1, <name>.2 ... */
+    n = i == 0 ? snprintf(dest, sizeof dest, "%s/%s", trash, name) : snprintf(dest, sizeof dest, "%s/%s.%d", trash, name, i);
+    if (n <= 0 || (size_t)n >= sizeof dest || strlen(dest) > NDP_PATH_MAX) return ndp_agent_error(out, cap, req, NDP_ST_PATH_INVALID, "name too long", 0);
+    if (fs->stat(fs->ctx, dest, &st) == NDP_ST_NOT_FOUND) break;
+  }
+  if (i == 1000) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "too many items with this name in the trash", 0);
+
+  rc = fs->rename(fs->ctx, norm, dest);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "could not move the item to the trash (left in place)", 0);
+
+  ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
+  ndp_tlv_put_str(&w, NDP_TAG_TRASH_PATH, dest);
+  return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
 }

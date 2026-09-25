@@ -430,6 +430,98 @@ static void test_symlinks(void) {
   CHECK(r.h.kind == NDP_KIND_ERR, "list through a directory symlink is refused");
 }
 
+
+static int trash_is(resp_t r, const char *expect) {
+  const uint8_t *v; size_t l;
+  return ndp_tlv_find(r.buf, r.len, NDP_TAG_TRASH_PATH, &v, &l) && l == strlen(expect) && memcmp(v, expect, l) == 0;
+}
+static resp_t del(const char *path) { return simple(&g_agent, NDP_CMD_FS_DELETE, path); }
+
+static void test_delete(void) {
+  resp_t r;
+  ndp_policy pol;
+  static const uint8_t d[1] = {'x'};
+  resp_t ready;
+
+  ndp_agent_close(&g_agent);
+  g_ops = g_real_ops;
+  new_agent(NDP_MODE_DEVELOPMENT);
+
+  /* a file goes to the trash; nothing is destroyed */
+  put(DIR "/del1.txt", "DEL1", 4);
+  r = del(DIR "/del1.txt");
+  CHECK(is_res(r) && trash_is(r, DIR "/.ndp-trash/del1.txt"), "delete reports the trash path");
+  CHECK(!exists(DIR "/del1.txt") && content_is(DIR "/.ndp-trash/del1.txt", "DEL1", 4), "the file was moved, content intact");
+  /* the same name again does not overwrite what is in the trash */
+  put(DIR "/del1.txt", "DEL1b", 5);
+  r = del(DIR "/del1.txt");
+  CHECK(is_res(r) && trash_is(r, DIR "/.ndp-trash/del1.txt.1"), "second deletion of the same name -> .1");
+  CHECK(content_is(DIR "/.ndp-trash/del1.txt", "DEL1", 4) && content_is(DIR "/.ndp-trash/del1.txt.1", "DEL1b", 5), "both versions kept");
+  put(DIR "/del1.txt", "DEL1c", 5);
+  CHECK(trash_is(del(DIR "/del1.txt"), DIR "/.ndp-trash/del1.txt.2"), "third -> .2");
+
+  /* a whole directory (with children) moves as a unit */
+  mk(DIR "/deldir"); mk(DIR "/deldir/sub");
+  put(DIR "/deldir/a.txt", "A", 1); put(DIR "/deldir/sub/b.txt", "B", 1);
+  r = del(DIR "/deldir");
+  CHECK(is_res(r) && trash_is(r, DIR "/.ndp-trash/deldir"), "directory delete");
+  CHECK(!exists(DIR "/deldir") && content_is(DIR "/.ndp-trash/deldir/a.txt", "A", 1) && content_is(DIR "/.ndp-trash/deldir/sub/b.txt", "B", 1), "children moved with it");
+
+  /* errors and protections */
+  CHECK(is_err(del(DIR "/nope.txt"), NDP_ST_NOT_FOUND), "missing item");
+  CHECK(is_err(del(DIR), NDP_ST_BAD_REQUEST), "a write root cannot be deleted");
+  put("/other/x.txt", "x", 1);
+  CHECK(is_err(del("/other/x.txt"), NDP_ST_PROTECTED_PATH) && exists("/other/x.txt"), "outside the write roots");
+  CHECK(is_err(del(DIR "/config"), NDP_ST_PROTECTED_PATH) && exists(DIR "/config"), "never_write zone");
+  CHECK(is_err(del("/luma"), NDP_ST_PROTECTED_PATH) && exists("/luma"), "/luma");
+  CHECK(is_err(del(DIR "/.ndp-trash/del1.txt"), NDP_ST_BAD_REQUEST) && exists(DIR "/.ndp-trash/del1.txt"), "items in the trash cannot be deleted permanently");
+  CHECK(is_err(del(DIR "/.ndp-trash"), NDP_ST_BAD_REQUEST), "the trash itself cannot be deleted");
+  CHECK(is_err(del("relative"), NDP_ST_PATH_INVALID), "invalid path");
+  { treq t; treq_init(&t); CHECK(is_err(frame(&g_agent, NDP_KIND_REQ, ++g_id, NDP_CMD_FS_DELETE, t.b, t.w.len), NDP_ST_BAD_REQUEST), "path required"); }
+  /* the trash is managed by the agent: no uploads / mkdir into it */
+  r = upload(&g_agent, DIR "/.ndp-trash/injected.txt", d, 1, opts(1), &ready);
+  CHECK(is_err(ready, NDP_ST_PROTECTED_PATH) && !exists(DIR "/.ndp-trash/injected.txt"), "no upload into the trash");
+  CHECK(is_err(simple(&g_agent, NDP_CMD_FS_MKDIR, DIR "/.ndp-trash/newdir"), NDP_ST_PROTECTED_PATH), "no mkdir in the trash");
+
+  /* READ_ONLY forbids deletion */
+  put(DIR "/ro-del.txt", "RO", 2);
+  new_agent(NDP_MODE_READ_ONLY);
+  CHECK(is_err(del(DIR "/ro-del.txt"), NDP_ST_FORBIDDEN_MODE) && exists(DIR "/ro-del.txt"), "READ_ONLY forbids delete");
+  new_agent(NDP_MODE_DEVELOPMENT);
+
+  /* symlinks are invisible to the protocol */
+  { char p[256], t[256]; full(p, sizeof p, DIR "/dellink"); full(t, sizeof t, "/other/x.txt"); symlink(t, p); }
+  CHECK(is_err(del(DIR "/dellink"), NDP_ST_NOT_FOUND) && exists("/other/x.txt"), "a symlink is not deletable and its target is untouched");
+
+  /* rename failure: the item stays where it was */
+  put(DIR "/stay.txt", "STAY", 4);
+  g_ops = g_real_ops; g_ops.rename = w_rename; g_agent.cfg.fs = &g_ops;
+  g_rename_calls = 0; g_rename_fail_at = 1;
+  CHECK(is_err(del(DIR "/stay.txt"), NDP_ST_IO_ERROR) && content_is(DIR "/stay.txt", "STAY", 4), "rename failure leaves the item in place");
+  g_rename_fail_at = 0; g_ops = g_real_ops; g_agent.cfg.fs = &g_ops;
+
+  /* several write roots: the trash lives under the MOST SPECIFIC root; the filesystem root works too */
+  ndp_policy_init_default(&pol);
+  pol.write_roots.count = 0;
+  ndp_pathlist_add(&pol.write_roots, DIR);
+  ndp_pathlist_add(&pol.write_roots, "/roms");
+  ndp_pathlist_add(&pol.write_roots, DIR "/inbox");
+  new_agent(NDP_MODE_DEVELOPMENT);
+  g_agent.policy = pol;
+  mk("/roms"); put("/roms/game.gba", "GBA", 3);
+  r = del("/roms/game.gba");
+  CHECK(is_res(r) && trash_is(r, "/roms/.ndp-trash/game.gba") && exists("/roms/.ndp-trash/game.gba"), "trash under /roms");
+  mk(DIR "/inbox"); put(DIR "/inbox/n.txt", "N", 1);
+  r = del(DIR "/inbox/n.txt");
+  CHECK(is_res(r) && trash_is(r, DIR "/inbox/.ndp-trash/n.txt"), "the most specific root owns the trash");
+  ndp_pathlist_add(&pol.write_roots, "/");
+  g_agent.policy = pol;
+  put("/at-root.txt", "R", 1);
+  r = del("/at-root.txt");
+  CHECK(is_res(r) && trash_is(r, "/.ndp-trash/at-root.txt") && exists("/.ndp-trash/at-root.txt"), "trash at the filesystem root");
+  CHECK(is_err(del("/luma"), NDP_ST_PROTECTED_PATH), "never_write still wins with a wide root");
+}
+
 int main(void) {
   char tmpl[] = "/tmp/ndp-w-test-XXXXXX", tmpl2[] = "/tmp/ndp-w-other-XXXXXX", cmd[200];
   if (!mkdtemp(tmpl) || !mkdtemp(tmpl2)) { perror("mkdtemp"); return 2; }
@@ -449,6 +541,7 @@ int main(void) {
   test_busy_and_abort();
   test_faults();
   test_symlinks();
+  test_delete();
 
   ndp_agent_close(&g_agent);
   snprintf(cmd, sizeof cmd, "rm -rf %s %s", g_root, g_other);

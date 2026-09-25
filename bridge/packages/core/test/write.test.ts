@@ -218,6 +218,68 @@ suite("writes over TCP (DEVELOPMENT mode)", () => {
     }
   });
 
+
+  test("delete moves to the trash: nothing is destroyed, content stays readable and recoverable", async () => {
+    const c = await connect();
+    try {
+      await c.hello();
+      writeFileSync(join(agentDir, "junk.txt"), "JUNK");
+      mkdirSync(join(agentDir, "junkdir/sub"), { recursive: true });
+      writeFileSync(join(agentDir, "junkdir/sub/deep.txt"), "DEEP");
+      const r = await c.delete(`${DIR}/junk.txt`);
+      assert.equal(r.trashPath, `${DIR}/.ndp-trash/junk.txt`);
+      assert.equal(existsSync(join(agentDir, "junk.txt")), false);
+      assert.equal(readFileSync(join(agentDir, ".ndp-trash/junk.txt"), "utf8"), "JUNK");
+      assert.equal(Buffer.from((await c.readBytes(r.trashPath)).data).toString(), "JUNK", "readable through the protocol");
+      // same name again keeps both
+      writeFileSync(join(agentDir, "junk.txt"), "JUNK2");
+      assert.equal((await c.delete(`${DIR}/junk.txt`)).trashPath, `${DIR}/.ndp-trash/junk.txt.1`);
+      assert.equal(readFileSync(join(agentDir, ".ndp-trash/junk.txt"), "utf8"), "JUNK");
+      // a folder moves whole
+      const d = await c.delete(`${DIR}/junkdir`);
+      assert.equal(d.trashPath, `${DIR}/.ndp-trash/junkdir`);
+      assert.equal(readFileSync(join(agentDir, ".ndp-trash/junkdir/sub/deep.txt"), "utf8"), "DEEP");
+      assert.equal(existsSync(join(agentDir, "junkdir")), false);
+    } finally {
+      c.close();
+    }
+  });
+
+  test("delete refuses: write roots, the trash, protected zones, missing items; nothing writes into the trash", async () => {
+    const c = await connect();
+    try {
+      await c.hello();
+      assert.equal(await code(c.delete(DIR)), "BAD_REQUEST");
+      assert.equal(await code(c.delete(`${DIR}/.ndp-trash`)), "BAD_REQUEST");
+      assert.equal(await code(c.delete(`${DIR}/.ndp-trash/junk.txt`)), "BAD_REQUEST");
+      assert.equal(await code(c.delete(`${DIR}/config`)), "PROTECTED_PATH");
+      assert.equal(await code(c.delete("/luma")), "PROTECTED_PATH");
+      assert.equal(await code(c.delete("/other")), "PROTECTED_PATH");
+      assert.equal(await code(c.delete(`${DIR}/does-not-exist`)), "NOT_FOUND");
+      assert.equal(await code(c.delete("relative")), "local:PathInvalidError");
+      assert.equal(await code(c.writeBytes(`${DIR}/.ndp-trash/x.txt`, new TextEncoder().encode("x"))), "PROTECTED_PATH");
+      assert.equal(await code(c.mkdir(`${DIR}/.ndp-trash/x`)), "PROTECTED_PATH");
+      assert.equal(existsSync(join(root, "luma")), true);
+      assert.equal(existsSync(join(agentDir, "config")), true);
+    } finally {
+      c.close();
+    }
+  });
+
+  test("CLI: rm moves several items, reports per-item failures, exit code reflects them", async () => {
+    const target = `127.0.0.1:${port}`;
+    const cli = (...args: string[]) => run(process.execPath, [CLI, ...args], { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 });
+    writeFileSync(join(agentDir, "rm1.txt"), "1");
+    writeFileSync(join(agentDir, "rm2.txt"), "2");
+    const ok = await cli("rm", target, `${DIR}/rm1.txt`, `${DIR}/rm2.txt`);
+    assert.match(ok.stdout.toString(), /rm1\.txt -> .*\.ndp-trash\/rm1\.txt/);
+    assert.match(ok.stdout.toString(), /rm2\.txt -> .*\.ndp-trash\/rm2\.txt/);
+    assert.equal(existsSync(join(agentDir, "rm1.txt")) || existsSync(join(agentDir, "rm2.txt")), false);
+    writeFileSync(join(agentDir, "rm3.txt"), "3");
+    await assert.rejects(cli("rm", target, `${DIR}/nope.txt`, `${DIR}/rm3.txt`), (e: { stderr: Buffer; code?: number }) => /NOT_FOUND/.test(e.stderr.toString()) && e.code === 1);
+    assert.equal(existsSync(join(agentDir, "rm3.txt")), false, "the valid item was still processed");
+  });
+
   test("CLI: put --text, put file, refuse overwrite, --replace, mkdir", async () => {
     const target = `127.0.0.1:${port}`;
     const cli = (...args: string[]) => run(process.execPath, [CLI, ...args], { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 });
@@ -240,7 +302,7 @@ suite("writes over TCP (DEVELOPMENT mode)", () => {
 });
 
 suite("READ_ONLY mode forbids every write", () => {
-  test("write and mkdir are refused; nothing is created", async () => {
+  test("write, mkdir and delete are refused; nothing changes", async () => {
     const root = mkdtempSync(join(tmpdir(), "ndp-write-ro-"));
     mkdirSync(join(root, DIR), { recursive: true });
     const { proc, port } = await startAgent(["--root", root, "--mode", "READ_ONLY"]);
@@ -250,7 +312,9 @@ suite("READ_ONLY mode forbids every write", () => {
       assert.equal(info.mode, "READ_ONLY");
       assert.equal(await code(c.writeBytes(`${DIR}/a.txt`, new TextEncoder().encode("x"))), "FORBIDDEN_MODE");
       assert.equal(await code(c.mkdir(`${DIR}/d`)), "FORBIDDEN_MODE");
-      assert.deepEqual(readdirSync(join(root, DIR)), []);
+      writeFileSync(join(root, DIR, "keep.txt"), "keep");
+      assert.equal(await code(c.delete(`${DIR}/keep.txt`)), "FORBIDDEN_MODE");
+      assert.deepEqual(readdirSync(join(root, DIR)), ["keep.txt"]);
       c.close();
     } finally {
       proc.kill();

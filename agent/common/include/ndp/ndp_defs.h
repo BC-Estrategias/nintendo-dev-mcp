@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define NDP_AGENT_VERSION "0.3.1"
+#define NDP_AGENT_VERSION "0.4.0"
 #define NDP_PROTOCOL_VERSION 1
 #define NDP_HEADER_SIZE 20
 #define NDP_MAC_SIZE 16
@@ -32,7 +32,8 @@ enum ndp_command {
   NDP_CMD_FS_STAT = 0x0021,
   NDP_CMD_FS_READ = 0x0022,
   NDP_CMD_FS_WRITE = 0x0030,
-  NDP_CMD_FS_MKDIR = 0x0031
+  NDP_CMD_FS_MKDIR = 0x0031,
+  NDP_CMD_FS_DELETE = 0x0033
 };
 
 enum ndp_fs_type { NDP_TYPE_FILE = 1, NDP_TYPE_DIR = 2 };
@@ -98,7 +99,8 @@ enum ndp_tag {
   NDP_TAG_BACKUP = 0x0041,
   NDP_TAG_REPLACED = 0x0043,
   NDP_TAG_WRITTEN = 0x0044,
-  NDP_TAG_MAX_CHUNK = 0x0045
+  NDP_TAG_MAX_CHUNK = 0x0045,
+  NDP_TAG_TRASH_PATH = 0x0046
 };
 
 /* Returned by ndp_agent_handle for frames that need no response (e.g. DATA frames of an upload). */

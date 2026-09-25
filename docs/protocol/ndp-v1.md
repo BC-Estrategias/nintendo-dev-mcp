@@ -58,6 +58,7 @@ mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16
 | 0x0030 | FS_WRITE | M5 ✔ | grava um arquivo (temp → validar → rename) |
 | 0x0031 | FS_MKDIR | M5 ✔ | cria um diretório |
 | 0x0032 | FS_RENAME | pós-MVP | |
+| 0x0033 | FS_DELETE | M5 ✔ | **move** para a lixeira (nunca apaga de verdade) |
 | 0x0040+ | LOG_* / CRASH_* | fase 3 | |
 | 0x8000–0xFFFF | reservado a extensões de plataforma | | |
 
@@ -124,6 +125,7 @@ ERR carrega, opcionalmente: `0x0001 detail` (str, texto humano curto, **informat
 | 0x0043 | replaced | u8 | FS_WRITE RES: 1 = havia um arquivo e foi substituído |
 | 0x0044 | written | u64 | FS_WRITE RES: bytes gravados |
 | 0x0045 | max_chunk | u32 | FS_WRITE RES (pronto): maior payload de DATA aceito |
+| 0x0046 | trash_path | str | FS_DELETE RES: onde o item foi parar na lixeira |
 
 ## 8. Ordem de validação de um frame recebido pelo agent
 Depois que o decoder entrega um frame, o agent avalia **nesta ordem** e responde ao primeiro problema:
@@ -195,7 +197,7 @@ Todos exigem HELLO prévio e passam pela política de leitura (§11) com o `path
 6. `sha256` cobre exatamente os bytes enviados em DATA.
 
 ## 14. Comandos de escrita (exigem modo DEVELOPMENT ou FULL)
-Passam pela política de **escrita** (§11): `FORBIDDEN_MODE` em `READ_ONLY`; `PROTECTED_PATH` fora das `write_roots` ou dentro de uma zona `never_write`; `PATH_INVALID`. O agent NUNCA cria diretórios implicitamente (o pai deve existir, senão `NOT_FOUND`) e NUNCA apaga nada por pedido do Bridge (não há comando de remoção).
+Passam pela política de **escrita** (§11): `FORBIDDEN_MODE` em `READ_ONLY`; `PROTECTED_PATH` fora das `write_roots` ou dentro de uma zona `never_write`; `PATH_INVALID`. O agent NUNCA cria diretórios implicitamente (o pai deve existir, senão `NOT_FOUND`) e NUNCA apaga nada de forma definitiva por pedido do Bridge (`FS_DELETE` só move para a lixeira).
 
 ### FS_MKDIR
 `REQ {path}` → `RES {}`. Já existe (arquivo ou diretório) → `EXISTS`.
@@ -216,3 +218,11 @@ Agent  → RES {written, sha256, replaced}       (ou ERR)
 - Falha em qualquer ponto → `ERR`, temp apagado, destino intacto. Após um `ERR` no meio, o agent descarta os DATA restantes desse `request_id` até o `END` ou até o próximo REQ.
 - `size` ≠ bytes recebidos → `BAD_REQUEST`; `sha256` ≠ calculado → `HASH_MISMATCH`.
 - Enquanto o upload está ativo, qualquer outro REQ recebe `BUSY`. Mudar o modo para `READ_ONLY` ou fechar a conexão aborta o upload.
+
+### FS_DELETE (lixeira)
+`REQ {path}` → `RES {trash_path}`. **Não remove dados**: o item (arquivo ou diretório inteiro, com o conteúdo) é *movido* por `rename` (atômico, mesma partição) para `<raiz>/.ndp-trash/<nome>`, onde `<raiz>` é a mais específica das `write_roots` que contém o `path`.
+- Passa pela política de escrita (§11): `FORBIDDEN_MODE`, `PROTECTED_PATH` (fora das raízes ou em zona `never_write`), `PATH_INVALID`.
+- `path` igual a uma `write_root` → `BAD_REQUEST` ("cannot delete a write root"). `path` já dentro de uma lixeira → `BAD_REQUEST` (remoção definitiva não existe no protocolo). Inexistente → `NOT_FOUND`.
+- A lixeira (`.ndp-trash`) é criada sob demanda (um `mkdir`, que no 3DS leva ~6 s na primeira vez por raiz). Nome de destino = o nome original; se já existir, `<nome>.1`, `<nome>.2`… (o sufixo `.N` não usa `~`, então continua endereçável).
+- `FS_WRITE`/`FS_MKDIR` para dentro de uma lixeira → `PROTECTED_PATH` (a lixeira é gerenciada pelo agent). A leitura funciona normalmente (é como se recupera o conteúdo: ler e/ou o usuário renomear pelo cartão).
+- Falha no `rename` → `IO_ERROR`, item intacto no lugar original.

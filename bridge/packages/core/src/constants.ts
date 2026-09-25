@@ -20,6 +20,7 @@ export const Command = {
   FS_READ: 0x0022,
   FS_WRITE: 0x0030,
   FS_MKDIR: 0x0031,
+  FS_DELETE: 0x0033,
 } as const;
 
 export const FsType = { FILE: 1, DIR: 2 } as const;
@@ -89,6 +90,7 @@ export const Tag = {
   REPLACED: 0x0043,
   WRITTEN: 0x0044,
   MAX_CHUNK: 0x0045,
+  TRASH_PATH: 0x0046,
 } as const;
 
 export type Mode = "READ_ONLY" | "DEVELOPMENT" | "FULL";

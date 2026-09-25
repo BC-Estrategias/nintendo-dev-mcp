@@ -411,6 +411,18 @@ export class NdpClient {
     return { ...r, data, truncated: (opts.offset ?? 0) + r.bytes < r.totalSize };
   }
 
+  /**
+   * "Deletes" by MOVING the item (file or whole directory) into `<write root>/.ndp-trash/` on the device.
+   * Nothing is destroyed; the returned path is where it can be found (and read) afterwards.
+   * The first deletion under a write root creates the trash folder, which takes ~6 s on a real 3DS.
+   */
+  async delete(path: string): Promise<{ trashPath: string }> {
+    const res = await this.request(Command.FS_DELETE, encodeTlv([[Tag.PATH, str(normalizePath(path))]]), SLOW_FS_TIMEOUT_MS);
+    const trashPath = parseTlv(res.payload).str(Tag.TRASH_PATH);
+    if (!trashPath) throw new NdpProtocolError(Status.BAD_REQUEST, "malformed FS_DELETE response");
+    return { trashPath };
+  }
+
   async mkdir(path: string): Promise<void> {
     // Measured on a real 3DS: creating a directory takes ~5.7 s (files take ~85 ms), so wait generously.
     await this.request(Command.FS_MKDIR, encodeTlv([[Tag.PATH, str(normalizePath(path))]]), SLOW_FS_TIMEOUT_MS);

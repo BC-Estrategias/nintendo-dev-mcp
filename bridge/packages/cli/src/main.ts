@@ -19,6 +19,8 @@ Usage:
                                                   upload (temp file + verify + rename on the device);
                                                   refuses to overwrite unless --replace
   ndev mkdir <host[:port]> <path>                 create a directory (the parent must exist)
+  ndev rm    <host[:port]> <path>...              move files/folders to the device's trash
+                                                  (<write root>/.ndp-trash/); nothing is destroyed
 
 Paths are absolute on the SD card ("/3ds/nintendo-dev-agent/agent.log"). The default port is ${DEFAULT_PORT}.`;
 
@@ -80,7 +82,7 @@ async function main(argv: string[]): Promise<number> {
     console.log(USAGE);
     return cmd ? 0 : 2;
   }
-  if (!["hello", "ping", "ls", "stat", "cat", "get", "put", "mkdir"].includes(cmd) || !target) {
+  if (!["hello", "ping", "ls", "stat", "cat", "get", "put", "mkdir", "rm"].includes(cmd) || !target) {
     console.error(USAGE);
     return 2;
   }
@@ -155,6 +157,24 @@ async function main(argv: string[]): Promise<number> {
       await client.mkdir(path);
       console.log(`created ${path}`);
       return 0;
+    });
+  }
+
+  if (cmd === "rm") {
+    const paths = parseFlags(rest, []).rest;
+    if (paths.length === 0) throw new Error("rm needs at least one <path>");
+    return withClient(target, async (client) => {
+      let failed = 0;
+      for (const p of paths) {
+        try {
+          const r = await client.delete(p);
+          console.log(`${p} -> ${r.trashPath}`);
+        } catch (e) {
+          failed++;
+          console.error(`${p}: ${e instanceof NdpRemoteError ? `${e.statusName}${e.detail ? ` — ${e.detail}` : ""}` : (e as Error).message}`);
+        }
+      }
+      return failed ? 1 : 0;
     });
   }
 

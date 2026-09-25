@@ -20,6 +20,7 @@ void ndp_agent_fs_close(ndp_agent *a);
 
 /* FS_WRITE / FS_MKDIR / upload frames (ndp_agent_write.c; require cfg.fs->file_create). */
 size_t ndp_agent_write_start(ndp_agent *a, const ndp_header *req, const uint8_t *payload, uint8_t *out, size_t cap);
+size_t ndp_agent_delete(ndp_agent *a, const ndp_header *req, const uint8_t *payload, uint8_t *out, size_t cap);
 size_t ndp_agent_mkdir(ndp_agent *a, const ndp_header *req, const uint8_t *payload, uint8_t *out, size_t cap);
 size_t ndp_agent_upload_frame(ndp_agent *a, const ndp_header *hdr, const uint8_t *payload, uint8_t *out, size_t cap);
 void ndp_agent_upload_abort(ndp_agent *a, int discard);

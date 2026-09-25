@@ -115,6 +115,7 @@ size_t ndp_agent_handle(ndp_agent *a, const ndp_header *req, const uint8_t *payl
   if (a->cfg.fs && a->cfg.fs->file_create) {
     if (req->command == NDP_CMD_FS_WRITE) return ndp_agent_write_start(a, req, payload, out, cap);
     if (req->command == NDP_CMD_FS_MKDIR) return ndp_agent_mkdir(a, req, payload, out, cap);
+    if (req->command == NDP_CMD_FS_DELETE) return ndp_agent_delete(a, req, payload, out, cap);
   }
   return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_COMMAND, "unknown command", 0);
 }
