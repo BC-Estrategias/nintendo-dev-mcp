@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "ndp/ndp_agent.h"
+#include "ndp/ndp_auth.h"
 #include "ndp/ndp_frame.h"
 #include "ndp/ndp_names.h"
 #include "ndp/ndp_path.h"
@@ -241,9 +242,16 @@ static void test_policy(void) {
   }
 }
 
-static void fixed_nonce(void *ctx, uint8_t *out, size_t n) {
+static int fixed_nonce(void *ctx, uint8_t *out, size_t n) {
   (void)ctx;
   memcpy(out, v_agent_nonce, n);
+  return 0;
+}
+/* The authenticated dialogues use their own device nonce (v_auth_device_nonce). */
+static int fixed_nonce_auth(void *ctx, uint8_t *out, size_t n) {
+  (void)ctx;
+  memcpy(out, v_auth_device_nonce, n);
+  return 0;
 }
 
 static void test_dialogues(void) {
@@ -287,6 +295,120 @@ static void test_dialogues(void) {
   }
 }
 
+/* ---------------------------------------------------------------- pairing / authentication */
+static void test_auth_primitives(void) {
+  int i;
+  uint8_t code[NDP_CODE_BYTES], psk[32], id[4], out[32];
+  char text[NDP_CODE_TEXT];
+  for (i = 0; i < V_KDF_N; i++) {
+    const v_kdf_t *k = &v_kdfs[i];
+    ndp_code_encode(k->code, text);
+    CHECK(strcmp(text, k->code_text) == 0, "code text %d: %s vs %s", i, text, k->code_text);
+    CHECK(ndp_code_decode(k->code_text, code) == 0 && memcmp(code, k->code, NDP_CODE_BYTES) == 0, "code round trip %d", i);
+    ndp_derive_psk(k->code, psk);
+    CHECK(memcmp(psk, k->psk, 32) == 0, "psk %d", i);
+    ndp_key_id(psk, id);
+    CHECK(memcmp(id, k->key_id, 4) == 0, "key id %d", i);
+    ndp_proof(psk, "pair", k->cn, k->dn, (const uint8_t *)k->label, strlen(k->label), out);
+    CHECK(memcmp(out, k->pair_proof, 32) == 0, "pair proof %d", i);
+    ndp_proof(psk, "auth", k->cn, k->dn, NULL, 0, out);
+    CHECK(memcmp(out, k->auth_proof, 32) == 0, "auth proof %d", i);
+    ndp_session_key(psk, k->cn, k->dn, out);
+    CHECK(memcmp(out, k->session, 32) == 0, "session key %d", i);
+  }
+  for (i = 0; i < V_CODEDEC_N; i++) {
+    int rc = ndp_code_decode(v_codedecs[i].text, code);
+    if (v_codedecs[i].ok) CHECK(rc == 0 && memcmp(code, v_codedecs[i].code, NDP_CODE_BYTES) == 0, "decode '%s'", v_codedecs[i].text);
+    else CHECK(rc != 0, "decode '%s' must fail", v_codedecs[i].text);
+  }
+}
+
+static void test_keystore(void) {
+  ndp_keystore ks, back;
+  uint8_t buf[NDP_KEYSTORE_MAX_BYTES], psk[32];
+  size_t n, i;
+  int j;
+  ndp_keystore_clear(&ks);
+  memset(ks.device_id, 0x42, 16);
+  ks.has_device_id = 1;
+  for (j = 0; j < NDP_MAX_KEYS; j++) {
+    char lab[8];
+    memset(psk, j + 1, 32);
+    snprintf(lab, sizeof lab, "pc%d", j);
+    CHECK(ndp_keystore_add(&ks, psk, lab) == NDP_OK, "add %d", j);
+  }
+  memset(psk, 9, 32);
+  CHECK(ndp_keystore_add(&ks, psk, "extra") == NDP_ST_NO_SPACE, "store full");
+  memset(psk, 1, 32);
+  CHECK(ndp_keystore_add(&ks, psk, "dup") == NDP_OK && ks.count == NDP_MAX_KEYS, "an identical key is a no-op");
+  n = ndp_keystore_serialize(&ks, buf, sizeof buf);
+  CHECK(n == 24 + NDP_MAX_KEYS * 52 + 32, "serialized size %zu", n);
+  CHECK(ndp_keystore_serialize(&ks, buf, n - 1) == 0, "too small buffer");
+  CHECK(ndp_keystore_parse(&back, buf, n) == 0 && back.count == NDP_MAX_KEYS && memcmp(back.device_id, ks.device_id, 16) == 0 &&
+            strcmp(back.keys[2].label, "pc2") == 0 && memcmp(back.keys[3].psk, ks.keys[3].psk, 32) == 0, "round trip");
+  for (i = 0; i < n; i++) { /* any single flipped byte is detected */
+    uint8_t save = buf[i];
+    buf[i] ^= 0x01;
+    CHECK(ndp_keystore_parse(&back, buf, n) != 0 && back.count == 0, "corruption at byte %zu detected", i);
+    buf[i] = save;
+  }
+  CHECK(ndp_keystore_parse(&back, buf, n - 1) != 0, "truncated");
+  CHECK(ndp_keystore_parse(&back, buf, 0) != 0, "empty");
+  ndp_keystore_clear(&ks);
+  n = ndp_keystore_serialize(&ks, buf, sizeof buf);
+  CHECK(n == 24 + 32 && ndp_keystore_parse(&back, buf, n) == 0 && back.count == 0, "empty store round trip");
+}
+
+static int fail_rng(void *ctx, uint8_t *out, size_t n) { (void)ctx; memset(out, 0, n); return -1; }
+
+static void test_auth_dialogues(void) {
+  int di;
+  static uint8_t dbuf[NDP_HEADER_SIZE + 65536 + NDP_MAC_SIZE], out[NDP_HEADER_SIZE + 65536 + NDP_MAC_SIZE];
+  for (di = 0; di < V_ADLG_N; di++) {
+    const v_adlg_t *d = &v_adlgs[di];
+    ndp_agent a;
+    ndp_agent_config cfg;
+    ndp_keystore ks;
+    ndp_pairing pairing;
+    int si, k, closed = 0;
+    memset(&cfg, 0, sizeof cfg);
+    ndp_keystore_clear(&ks);
+    memcpy(ks.device_id, v_auth_device_id, 16);
+    ks.has_device_id = 1;
+    for (k = 0; k < d->key_count; k++) ndp_keystore_add(&ks, v_akeys[d->key_first + k].psk, v_akeys[d->key_first + k].label);
+    memset(&pairing, 0, sizeof pairing);
+    pairing.active = d->pairing_open;
+    if (d->pairing_open) memcpy(pairing.code, d->code, NDP_CODE_BYTES);
+    cfg.platform = V_AGENT_PLATFORM; cfg.agent_version = V_AGENT_VERSION; cfg.mode = NDP_MODE_READ_ONLY;
+    cfg.auth = "required"; cfg.max_frame = V_AGENT_MAXFRAME;
+    cfg.random_bytes = d->rng_fail ? fail_rng : fixed_nonce_auth;
+    cfg.keys = &ks; cfg.pairing = &pairing;
+    ndp_agent_init(&a, &cfg);
+    for (si = 0; si < d->count && !closed; si++) {
+      const v_astep_t *s = &v_asteps[d->first + si];
+      ndp_decoder dec;
+      size_t used = 0, n;
+      int rc;
+      ndp_decoder_init(&dec, dbuf, sizeof dbuf, 65536);
+      rc = ndp_decoder_feed(&dec, s->req, s->req_len, &used);
+      CHECK(rc == NDP_DEC_FRAME, "auth dialogue %s step %d: request must decode", d->name, si);
+      if (rc != NDP_DEC_FRAME) break;
+      n = ndp_agent_handle_frame(&a, ndp_decoder_header(&dec), ndp_decoder_payload(&dec), ndp_decoder_mac(&dec), out, sizeof out);
+      if (s->close) {
+        CHECK(n == NDP_CLOSE, "auth dialogue %s step %d: the connection must be closed (got %zu)", d->name, si, n);
+        closed = 1;
+      } else {
+        CHECK(n == s->res_len && n != NDP_CLOSE && memcmp(out, s->res, n) == 0, "auth dialogue %s step %d: response mismatch (len %zu vs %zu)", d->name, si, n, s->res_len);
+      }
+    }
+    CHECK(ks.count == d->after_count, "auth dialogue %s: %d keys stored, want %d", d->name, ks.count, d->after_count);
+    for (k = 0; k < d->after_count && k < ks.count; k++)
+      CHECK(memcmp(ks.keys[k].psk, v_aafter[di][k], 32) == 0, "auth dialogue %s: stored key %d", d->name, k);
+    CHECK(pairing.active == d->pairing_open_after, "auth dialogue %s: pairing window %d, want %d", d->name, pairing.active, d->pairing_open_after);
+  }
+}
+
+
 int main(void) {
   test_sha256();
   test_hmac();
@@ -298,6 +420,9 @@ int main(void) {
   test_paths();
   test_policy();
   test_dialogues();
+  test_auth_primitives();
+  test_keystore();
+  test_auth_dialogues();
   printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

@@ -17,6 +17,8 @@ typedef struct {
   uint64_t (*now_ms)(void *ctx);
   /* One log line, without trailing newline. May be NULL. */
   void (*log)(void *ctx, const char *line);
+  /* The key store changed (a computer was paired, or the pairings were cleared): persist it. May be NULL. */
+  void (*keys_changed)(void *ctx, const ndp_keystore *keys);
 } ndp_server_platform;
 
 typedef struct {
@@ -36,13 +38,16 @@ typedef struct {
   uint32_t connections_closed;
   uint32_t requests;
 
+  ndp_keystore keys;     /* paired computers (persisted by the platform) */
+  ndp_pairing pairing;   /* the pairing window (spans connections) */
+
   ndp_agent agent;
   ndp_decoder dec;
   uint8_t rbuf[NDP_HEADER_SIZE + NDP_DEFAULT_MAX_FRAME + NDP_MAC_SIZE];
 
   /* Output queue: one frame at a time, sent without blocking (a 64 KiB DATA frame may need
    * several send() calls). Stream frames are produced only when the previous one is fully out. */
-  uint8_t out[NDP_HEADER_SIZE + NDP_DEFAULT_MAX_FRAME];
+  uint8_t out[NDP_HEADER_SIZE + NDP_DEFAULT_MAX_FRAME + NDP_MAC_SIZE]; /* room for the MAC of sealed frames */
   size_t out_len, out_off;
 
   /* Input received but not yet decoded (a recv may carry several frames). */
@@ -61,6 +66,18 @@ void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_a
 /* Starts listening on `s_addr` (network byte order) and `port` (0 = ephemeral). Closes any previous
  * listener/client first. Returns 0, or a negative errno-style value. */
 int ndp_server_listen(ndp_server *s, uint32_t s_addr, uint16_t port);
+
+/* Loads the persisted key store (call before listening). Pass the bytes read from the store file. */
+void ndp_server_set_keys(ndp_server *s, const ndp_keystore *keys);
+/* Opens the pairing window with `code` for `duration_ms` (spec §4.1). The platform generates the code
+ * from a secure random source and shows it to the user. */
+void ndp_server_open_pairing(ndp_server *s, const uint8_t code[NDP_CODE_BYTES], uint32_t duration_ms);
+void ndp_server_close_pairing(ndp_server *s);
+/* Milliseconds left in the window, 0 when it is closed. */
+uint32_t ndp_server_pairing_remaining_ms(ndp_server *s);
+/* Forgets every paired computer (persisted through keys_changed). The current client stays connected
+ * until it disconnects; its session key is no longer valid for new sessions. */
+void ndp_server_clear_keys(ndp_server *s);
 
 /* Changes the access mode (also for the current connection). Dropping to READ_ONLY aborts an upload. */
 void ndp_server_set_mode(ndp_server *s, ndp_mode mode);

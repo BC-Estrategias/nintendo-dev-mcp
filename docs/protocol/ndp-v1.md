@@ -39,18 +39,44 @@ Payload de REQ/RES/ERR/END é uma sequência de campos:
 - Um mesmo tag repetido: vale o **primeiro**, salvo tags definidas como repetíveis.
 - Payload de DATA são bytes crus (sem TLV).
 
-## 4. Autenticação por frame (MAC)
-Quando `flags.bit0 = 1`, 16 bytes seguem o payload:
+## 4. Autenticação, pareamento e MAC por frame
+Sem TLS no console: o canal é **autenticado e íntegro (HMAC por frame), mas não criptografado** (o conteúdo dos arquivos é visível na LAN).
+
+### 4.1 Chave de pareamento
+- No console o usuário abre uma **janela de pareamento** (tecla Y; 120 s; no máximo 5 tentativas erradas). O console gera 10 bytes aleatórios seguros (80 bits) e os mostra em Base32 Crockford, `XXXX-XXXX-XXXX-XXXX` (16 caracteres; alfabeto `0123456789ABCDEFGHJKMNPQRSTVWXYZ`; ao ler, `O→0`, `I,L→1`, maiúsculas, hífens/espaços ignorados).
+- `PSK = SHA-256("NDP-PSK-v1" ‖ code[10])` (32 bytes). `key_id = SHA-256(PSK)[0:4]`.
+- O **código nunca trafega**. O Bridge o digita uma vez (`ndev pair`), deriva a `PSK` e a guarda; o console guarda a `PSK` (até 4 computadores pareados) em arquivo que **nenhum comando do protocolo lê ou escreve**.
+
+### 4.2 Provas (HMAC-SHA-256)
+`proof(psk, rótulo, cn, dn, extra) = HMAC(psk, rótulo ‖ cn[16] ‖ dn[16] ‖ extra)` onde `cn` = nonce do Bridge (HELLO REQ), `dn` = nonce do console (HELLO RES); `rótulo` = os bytes ASCII `"pair"`, `"auth"` ou `"session"`.
+
+### 4.3 PAIR (0x0004) — só com a janela aberta
+`REQ {label str (≤ 15 bytes), proof bytes32 = proof(PSK, "pair", cn, dn, label)}` → `RES {key_id bytes4}`. O console verifica com o código que **está exibindo** (deriva a PSK), guarda `{key_id, PSK, label}`, fecha a janela. Prova errada → `UNAUTHORIZED` e conta uma tentativa (5 → janela fechada e conexão encerrada); janela fechada → `UNAUTHORIZED` ("pairing is not open"); chaveiro cheio → `NO_SPACE`.
+
+### 4.4 AUTH (0x0005)
+`REQ {key_id bytes4, proof bytes32 = proof(PSK, "auth", cn, dn, "")}` (frame **sem** MAC) → `RES {}` **já com MAC** (é o primeiro frame selado). Chave desconhecida ou prova errada → `UNAUTHORIZED` (5 falhas encerram a conexão).
+`session_key = HMAC(PSK, "session" ‖ cn ‖ dn)`.
+
+### 4.5 Frames selados
+Depois de um AUTH bem-sucedido, **todo** frame em **ambas** as direções DEVE ter `flags.MAC`:
 ```
 mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16]
 ```
-`counter` é um contador por direção, começando em 0 e incrementando a cada frame **com MAC**. Um frame com MAC inválido ou contador fora de ordem DEVE ser descartado e a conexão fechada. A derivação de `session_key` e o pairing serão especificados no marco M5; o M0 define apenas o formato e o cálculo do MAC. Até lá o agent anuncia `auth = "none"`.
+(`header` já com o bit MAC ligado). O contador é **por direção**, começa em 0 no primeiro frame selado daquela direção (para o console→Bridge, é o `RES` do AUTH; para o Bridge→console, é o primeiro REQ depois do AUTH) e sobe 1 por frame. Frame sem MAC, MAC inválido ou contador fora de ordem ⇒ a conexão é **encerrada** sem resposta. O comprimento máximo do payload continua `max_frame`; o MAC (16 bytes) vem além dele.
+
+### 4.6 Regras do console
+- `auth = "required"` (HELLO RES): antes do AUTH só são aceitos HELLO, PAIR (com a janela aberta) e AUTH; qualquer outro comando → `UNAUTHORIZED`. `auth = "none"` (somente testes/desenvolvimento): sem AUTH nem MAC.
+- Com `auth = "required"` o HELLO RES traz também `device_id bytes16` (identificador estável do console, gerado no primeiro pareamento), `paired_keys u8` (quantos computadores) e `pairing_open u8`.
+- O nonce do console DEVE vir de um gerador seguro; se não houver, com `auth = "required"` o HELLO falha (`IO_ERROR`) — nunca usar nonce fraco.
+- Um HELLO **depois** do AUTH → `BAD_REQUEST` ("already authenticated"; abra uma nova conexão). Um frame com o bit MAC **antes** do AUTH encerra a conexão.
 
 ## 5. Comandos
 | ID | Nome | M0 | Descrição |
 |---|---|---|---|
 | 0x0001 | HELLO | ✔ | negocia protocolo, anuncia plataforma |
 | 0x0002 | PING | ✔ | eco de nonce |
+| 0x0004 | PAIR | M5 ✔ | pareamento (janela aberta no console) |
+| 0x0005 | AUTH | M5 ✔ | prova de posse da chave pareada |
 | 0x0010 | DEVICE_INFO | M2 | |
 | 0x0020 | FS_LIST | M3 ✔ | lista um diretório (paginado) |
 | 0x0021 | FS_STAT | M3 ✔ | tipo, tamanho, mtime |
@@ -126,6 +152,12 @@ ERR carrega, opcionalmente: `0x0001 detail` (str, texto humano curto, **informat
 | 0x0044 | written | u64 | FS_WRITE RES: bytes gravados |
 | 0x0045 | max_chunk | u32 | FS_WRITE RES (pronto): maior payload de DATA aceito |
 | 0x0046 | trash_path | str | FS_DELETE RES: onde o item foi parar na lixeira |
+| 0x0047 | paired_keys | u8 | HELLO RES (auth required): computadores pareados |
+| 0x0048 | pairing_open | u8 | HELLO RES (auth required): 1 = janela de pareamento aberta |
+| 0x0049 | device_id | bytes[16] | HELLO RES (auth required) |
+| 0x004A | key_id | bytes[4] | AUTH REQ; PAIR RES |
+| 0x004B | proof | bytes[32] | PAIR REQ / AUTH REQ |
+| 0x004C | label | str | PAIR REQ (≤ 15 bytes) |
 
 ## 8. Ordem de validação de um frame recebido pelo agent
 Depois que o decoder entrega um frame, o agent avalia **nesta ordem** e responde ao primeiro problema:

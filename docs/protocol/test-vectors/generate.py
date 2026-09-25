@@ -38,6 +38,8 @@ T_DETAIL, T_OSRES = 0x0001, 0x0002
 T_PROTO, T_PROTO_MAX, T_BRIDGE, T_NONCE = 0x0010, 0x0011, 0x0012, 0x0013
 T_PLATFORM, T_AGENT_VER, T_AUTH, T_MODE, T_MAXFRAME = 0x0014, 0x0015, 0x0016, 0x0017, 0x0018
 T_SUP_MIN, T_SUP_MAX, T_PING = 0x0019, 0x001A, 0x0020
+T_PAIRED, T_PAIRING_OPEN, T_DEVICE_ID, T_KEY_ID, T_PROOF, T_LABEL = 0x0047, 0x0048, 0x0049, 0x004A, 0x004B, 0x004C
+CMD_PAIR, CMD_AUTH = 0x0004, 0x0005
 MODES = ["READ_ONLY", "DEVELOPMENT", "FULL"]
 
 
@@ -232,6 +234,315 @@ def req_dict(kind, id_, cmd, payload=b"", version=1):
     return {"kind": KIND[kind], "id": id_, "cmd": cmd, "payload": payload, "version": version}
 
 
+
+# ---------------------------------------------------------------- pareamento / autenticação (spec §4)
+CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def code_encode(code10: bytes) -> str:
+    bits = int.from_bytes(code10, "big")
+    chars = "".join(CROCKFORD[(bits >> (75 - 5 * i)) & 31] for i in range(16))
+    return "-".join(chars[i:i + 4] for i in range(0, 16, 4))
+
+
+def code_decode(text: str):
+    """Devolve os 10 bytes ou None (caractere inválido / tamanho errado)."""
+    val = 0
+    n = 0
+    for ch in text.upper():
+        if ch in "- ":
+            continue
+        ch = {"O": "0", "I": "1", "L": "1"}.get(ch, ch)
+        k = CROCKFORD.find(ch)
+        if k < 0:
+            return None
+        val = (val << 5) | k
+        n += 1
+    return val.to_bytes(10, "big") if n == 16 else None
+
+
+def derive_psk(code10: bytes) -> bytes:
+    return hashlib.sha256(b"NDP-PSK-v1" + code10).digest()
+
+
+def key_id_of(psk: bytes) -> bytes:
+    return hashlib.sha256(psk).digest()[:4]
+
+
+def proof_of(psk: bytes, label: str, cn: bytes, dn: bytes, extra: bytes = b"") -> bytes:
+    return hmac.new(psk, label.encode() + cn + dn + extra, hashlib.sha256).digest()
+
+
+def session_key_of(psk: bytes, cn: bytes, dn: bytes) -> bytes:
+    return hmac.new(psk, b"session" + cn + dn, hashlib.sha256).digest()
+
+
+def sealed(session, counter, kind, request_id, command, status=0, payload=b"", version=1):
+    """Frame com o bit MAC e o MAC (spec §4.5)."""
+    unsigned = frame(kind, request_id, command, status, payload, FLAG_MAC, None, version)
+    return unsigned + mac_of(session, counter, unsigned)
+
+
+MAX_KEYS = 4
+MAX_FAILS = 5
+AUTH_DEVICE_ID = bytes(range(0x50, 0x60))
+AUTH_NONCE = bytes(range(0xC0, 0xD0))
+BRIDGE_NONCE = bytes(range(0x00, 0x10))
+
+
+class AuthAgent:
+    """Modelo de referência do agent com autenticação (HELLO/PING/PAIR/AUTH)."""
+
+    def __init__(self, keys, pairing_open=False, pairing_code=None, rng_fail=False, auth="required"):
+        self.keys = list(keys)  # [(psk, label)]
+        self.pairing_open = pairing_open
+        self.pairing_code = pairing_code
+        self.rng_fail = rng_fail
+        self.auth = auth
+        self.hello = False
+        self.authed = False
+        self.session = None
+        self.send_ctr = 0
+        self.recv_ctr = 0
+        self.fails = 0
+        self.cn = None
+        self.dn = None
+
+    def _reply(self, wire):
+        if self.authed:
+            h = wire[:20]
+            payload = wire[20:]
+            kind, rid, cmd, status = h[5], struct.unpack_from("<I", h, 8)[0], struct.unpack_from("<H", h, 12)[0], struct.unpack_from("<H", h, 14)[0]
+            wire = sealed(self.session, self.send_ctr, kind, rid, cmd, status, payload)
+            self.send_ctr += 1
+        return ("reply", wire)
+
+    def handle(self, wire):
+        magic, version, kind, flags, rid, cmd, status, plen = HDR.unpack_from(wire, 0)
+        payload = wire[20:20 + plen]
+        mac = wire[20 + plen:20 + plen + 16] if flags & FLAG_MAC else None
+        if self.authed:
+            if mac is None:
+                return ("close", None)
+            if not hmac.compare_digest(mac, mac_of(self.session, self.recv_ctr, wire[:20 + plen])):
+                return ("close", None)
+            self.recv_ctr += 1
+        elif mac is not None:
+            return ("close", None)
+        req = {"kind": kind, "version": version, "id": rid, "cmd": cmd, "payload": payload}
+        return self._dispatch(req)
+
+    def _err(self, req, status, detail, extra=b""):
+        return self._reply(err_frame(req, status, detail, extra))
+
+    def _dispatch(self, req):
+        if req["version"] != 1:
+            return self._err(req, "UNSUPPORTED_PROTOCOL", "unsupported frame version",
+                             tlv(T_SUP_MIN, u16(1)) + tlv(T_SUP_MAX, u16(1)))
+        if req["kind"] != KIND["REQ"]:
+            return self._err(req, "BAD_REQUEST", "expected REQ")
+        try:
+            fields = {}
+            for tag, val in parse_tlvs(req["payload"]):
+                fields.setdefault(tag, val)
+        except struct.error:
+            return self._err(req, "BAD_REQUEST", "malformed payload")
+        cmd = req["cmd"]
+        if cmd == CMD_HELLO:
+            if self.authed:
+                return self._err(req, "BAD_REQUEST", "already authenticated")
+            if not all(t in fields for t in (T_PROTO, T_PROTO_MAX, T_NONCE)):
+                return self._err(req, "BAD_REQUEST", "missing field")
+            if len(fields[T_PROTO]) != 2 or len(fields[T_PROTO_MAX]) != 2 or len(fields[T_NONCE]) != 16:
+                return self._err(req, "BAD_REQUEST", "bad field size")
+            if self.auth == "required" and self.rng_fail:
+                return self._err(req, "IO_ERROR", "no secure random")
+            self.hello = True
+            self.cn = fields[T_NONCE]
+            self.dn = AUTH_NONCE
+            p = (tlv(T_PROTO, u16(1)) + tlv(T_PLATFORM, b"host") + tlv(T_AGENT_VER, b"0.1.0") +
+                 tlv(T_NONCE, self.dn) + tlv(T_AUTH, self.auth.encode()) + tlv(T_MODE, b"READ_ONLY") +
+                 tlv(T_MAXFRAME, u32(65536)))
+            if self.auth == "required":
+                p += (tlv(T_DEVICE_ID, AUTH_DEVICE_ID) + tlv(T_PAIRED, bytes([len(self.keys)])) +
+                      tlv(T_PAIRING_OPEN, bytes([1 if self.pairing_open else 0])))
+            return self._reply(frame("RES", req["id"], cmd, 0, p))
+        if not self.hello:
+            return self._err(req, "HELLO_REQUIRED", "send HELLO first")
+        if self.auth == "required" and not self.authed:
+            if cmd == CMD_PAIR:
+                return self._pair(req, fields)
+            if cmd == CMD_AUTH:
+                return self._auth(req, fields)
+            return self._err(req, "UNAUTHORIZED", "authentication required")
+        if cmd == CMD_PING:
+            n = fields.get(T_PING)
+            if n is None or len(n) != 8:
+                return self._err(req, "BAD_REQUEST", "ping_nonce required")
+            return self._reply(frame("RES", req["id"], cmd, 0, tlv(T_PING, n)))
+        if cmd in (CMD_PAIR, CMD_AUTH) and self.auth == "required":
+            return self._err(req, "BAD_REQUEST", "already authenticated")
+        return self._err(req, "UNSUPPORTED_COMMAND", "unknown command")
+
+    def _fail(self, req, detail):
+        self.fails += 1
+        if self.fails >= MAX_FAILS:
+            self.pairing_open = False
+            return ("close", None)
+        return self._err(req, "UNAUTHORIZED", detail)
+
+    def _pair(self, req, fields):
+        label, proof = fields.get(T_LABEL), fields.get(T_PROOF)
+        if label is None or proof is None or len(proof) != 32 or len(label) > 15 or len(label) == 0:
+            return self._err(req, "BAD_REQUEST", "label and proof required")
+        if not self.pairing_open:
+            return self._fail(req, "pairing is not open")
+        psk = derive_psk(self.pairing_code)
+        if not hmac.compare_digest(proof, proof_of(psk, "pair", self.cn, self.dn, label)):
+            return self._fail(req, "wrong pairing code")
+        if len(self.keys) >= MAX_KEYS:
+            return self._err(req, "NO_SPACE", "pairing storage is full")
+        self.keys.append((psk, label.decode()))
+        self.pairing_open = False
+        return self._reply(frame("RES", req["id"], req["cmd"], 0, tlv(T_KEY_ID, key_id_of(psk))))
+
+    def _auth(self, req, fields):
+        kid, proof = fields.get(T_KEY_ID), fields.get(T_PROOF)
+        if kid is None or proof is None or len(kid) != 4 or len(proof) != 32:
+            return self._err(req, "BAD_REQUEST", "key_id and proof required")
+        for psk, _label in self.keys:
+            if key_id_of(psk) == kid:
+                if hmac.compare_digest(proof, proof_of(psk, "auth", self.cn, self.dn)):
+                    self.authed = True
+                    self.session = session_key_of(psk, self.cn, self.dn)
+                    self.send_ctr = 0
+                    self.recv_ctr = 0
+                    return self._reply(frame("RES", req["id"], req["cmd"], 0, b""))
+                return self._fail(req, "authentication failed")
+        return self._fail(req, "unknown key")
+
+
+def build_auth_vectors():
+    out = {}
+    codes = [bytes(range(10)), bytes([0xFF] * 10), bytes.fromhex("0123456789abcdef0123"), bytes(10)]
+    out["kdf"] = []
+    for c in codes:
+        psk = derive_psk(c)
+        out["kdf"].append({
+            "code_hex": hx(c), "code_text": code_encode(c), "psk_hex": hx(psk), "key_id_hex": hx(key_id_of(psk)),
+            "cn_hex": hx(BRIDGE_NONCE), "dn_hex": hx(AUTH_NONCE),
+            "pair_proof_hex": hx(proof_of(psk, "pair", BRIDGE_NONCE, AUTH_NONCE, b"my-mac")),
+            "auth_proof_hex": hx(proof_of(psk, "auth", BRIDGE_NONCE, AUTH_NONCE)),
+            "session_key_hex": hx(session_key_of(psk, BRIDGE_NONCE, AUTH_NONCE)),
+            "label": "my-mac",
+        })
+    c0 = bytes(range(10))
+    t0 = code_encode(c0)
+    out["code_decode"] = [
+        {"text": t0, "code_hex": hx(c0)},
+        {"text": t0.lower(), "code_hex": hx(c0)},
+        {"text": t0.replace("-", " "), "code_hex": hx(c0)},
+        {"text": t0.replace("-", ""), "code_hex": hx(c0)},
+        {"text": "0000-0000-0000-000O", "code_hex": hx(bytes(10))},   # O -> 0
+        {"text": "0000-0000-0000-000I", "code_hex": hx(code_decode("0000-0000-0000-0001"))},  # I -> 1
+        {"text": "0000-0000-0000-000L", "code_hex": hx(code_decode("0000-0000-0000-0001"))},  # L -> 1
+        {"text": "0000-0000-0000-000U", "code_hex": None},              # U não existe no alfabeto
+        {"text": "0000-0000-0000-000", "code_hex": None},               # curto
+        {"text": "0000-0000-0000-00000", "code_hex": None},             # longo
+        {"text": "", "code_hex": None},
+    ]
+
+    K1 = derive_psk(bytes(range(10)))
+    K2 = derive_psk(bytes(range(20, 30)))
+    KID1 = key_id_of(K1)
+    sk1 = session_key_of(K1, BRIDGE_NONCE, AUTH_NONCE)
+    code_c = bytes(range(100, 110))
+    psk_c = derive_psk(code_c)
+
+    def hello_wire(i=1, nonce=BRIDGE_NONCE):
+        return frame("REQ", i, CMD_HELLO, 0, tlv(T_PROTO, u16(1)) + tlv(T_PROTO_MAX, u16(1)) + tlv(T_BRIDGE, b"ndev/0.2.0") + tlv(T_NONCE, nonce))
+
+    def ping_payload(n): return tlv(T_PING, u64(n))
+    def auth_wire(i, kid, proof): return frame("REQ", i, CMD_AUTH, 0, tlv(T_KEY_ID, kid) + tlv(T_PROOF, proof))
+    def pair_wire(i, label, proof): return frame("REQ", i, CMD_PAIR, 0, tlv(T_LABEL, label) + tlv(T_PROOF, proof))
+    good_auth = proof_of(K1, "auth", BRIDGE_NONCE, AUTH_NONCE)
+
+    def dlg(name, cfg, steps_fn):
+        agent = AuthAgent(**cfg["agent"])
+        steps = []
+        for wire in steps_fn():
+            kind, resp = agent.handle(wire)
+            steps.append({"request_hex": hx(wire), "response_hex": hx(resp) if resp is not None else None, "close": kind == "close"})
+            if kind == "close":
+                break  # the connection is gone: later steps are meaningless
+        return {
+            "name": name,
+            "config": {"keys": [{"psk_hex": hx(p), "label": l} for p, l in cfg["agent"]["keys"]],
+                       "pairing_open": cfg["agent"].get("pairing_open", False),
+                       "pairing_code_hex": hx(cfg["agent"]["pairing_code"]) if cfg["agent"].get("pairing_code") else None,
+                       "rng_fail": cfg["agent"].get("rng_fail", False)},
+            "steps": steps,
+            "store_after": [{"key_id_hex": hx(key_id_of(p)), "psk_hex": hx(p), "label": l} for p, l in agent.keys],
+            "pairing_open_after": agent.pairing_open,
+        }
+
+    def A(**kw): return {"agent": kw}
+    dialogues = []
+    dialogues.append(dlg("unpaired_console", A(keys=[]), lambda: [
+        hello_wire(1), frame("REQ", 2, CMD_PING, 0, ping_payload(1)), auth_wire(3, b"\x01\x02\x03\x04", bytes(32)),
+        pair_wire(4, b"my-mac", bytes(32))]))
+    dialogues.append(dlg("pair_success", A(keys=[], pairing_open=True, pairing_code=code_c), lambda: [
+        hello_wire(1), pair_wire(2, b"my-mac", proof_of(psk_c, "pair", BRIDGE_NONCE, AUTH_NONCE, b"my-mac")),
+        pair_wire(3, b"again", proof_of(psk_c, "pair", BRIDGE_NONCE, AUTH_NONCE, b"again"))]))
+    dialogues.append(dlg("pair_wrong_code_then_ok", A(keys=[], pairing_open=True, pairing_code=code_c), lambda: [
+        hello_wire(1), pair_wire(2, b"my-mac", bytes(32)),
+        pair_wire(3, b"my-mac", proof_of(derive_psk(bytes(10)), "pair", BRIDGE_NONCE, AUTH_NONCE, b"my-mac")),
+        pair_wire(4, b"my-mac", proof_of(psk_c, "pair", BRIDGE_NONCE, AUTH_NONCE, b"my-mac"))]))
+    dialogues.append(dlg("pair_five_failures_close", A(keys=[], pairing_open=True, pairing_code=code_c), lambda: [
+        hello_wire(1)] + [pair_wire(2 + i, b"x", bytes(32)) for i in range(5)] + [hello_wire(9)]))
+    dialogues.append(dlg("pair_proof_bound_to_label", A(keys=[], pairing_open=True, pairing_code=code_c), lambda: [
+        hello_wire(1), pair_wire(2, b"other", proof_of(psk_c, "pair", BRIDGE_NONCE, AUTH_NONCE, b"my-mac"))]))
+    dialogues.append(dlg("pair_storage_full", A(keys=[(derive_psk(bytes([i] * 10)), f"k{i}") for i in range(4)], pairing_open=True, pairing_code=code_c), lambda: [
+        hello_wire(1), pair_wire(2, b"my-mac", proof_of(psk_c, "pair", BRIDGE_NONCE, AUTH_NONCE, b"my-mac"))]))
+    dialogues.append(dlg("pair_bad_fields", A(keys=[], pairing_open=True, pairing_code=code_c), lambda: [
+        hello_wire(1), frame("REQ", 2, CMD_PAIR, 0, tlv(T_LABEL, b"x")), frame("REQ", 3, CMD_PAIR, 0, tlv(T_LABEL, b"x" * 16) + tlv(T_PROOF, bytes(32)))]))
+    dialogues.append(dlg("auth_flow", A(keys=[(K1, "my-mac"), (K2, "other")]), lambda: [
+        hello_wire(1), auth_wire(2, KID1, good_auth),
+        sealed(sk1, 0, "REQ", 3, CMD_PING, 0, ping_payload(7)),
+        sealed(sk1, 1, "REQ", 4, CMD_PING, 0, ping_payload(8)),
+        sealed(sk1, 2, "REQ", 5, 0x7777, 0, b""),
+        sealed(sk1, 3, "REQ", 6, CMD_HELLO, 0, tlv(T_PROTO, u16(1)) + tlv(T_PROTO_MAX, u16(1)) + tlv(T_NONCE, bytes(16)))]))
+    dialogues.append(dlg("auth_second_key", A(keys=[(K1, "my-mac"), (K2, "other")]), lambda: [
+        hello_wire(1), auth_wire(2, key_id_of(K2), proof_of(K2, "auth", BRIDGE_NONCE, AUTH_NONCE)),
+        sealed(session_key_of(K2, BRIDGE_NONCE, AUTH_NONCE), 0, "REQ", 3, CMD_PING, 0, ping_payload(1))]))
+    dialogues.append(dlg("auth_wrong_proof", A(keys=[(K1, "my-mac")]), lambda: [
+        hello_wire(1), auth_wire(2, KID1, bytes(32)), auth_wire(3, KID1, good_auth)]))
+    dialogues.append(dlg("auth_unknown_key", A(keys=[(K1, "my-mac")]), lambda: [
+        hello_wire(1), auth_wire(2, b"\xde\xad\xbe\xef", good_auth)]))
+    dialogues.append(dlg("auth_five_failures_close", A(keys=[(K1, "my-mac")]), lambda: [
+        hello_wire(1)] + [auth_wire(2 + i, KID1, bytes(32)) for i in range(5)]))
+    dialogues.append(dlg("auth_missing_mac_after_auth", A(keys=[(K1, "my-mac")]), lambda: [
+        hello_wire(1), auth_wire(2, KID1, good_auth), frame("REQ", 3, CMD_PING, 0, ping_payload(1))]))
+    dialogues.append(dlg("auth_bad_mac", A(keys=[(K1, "my-mac")]), lambda: [
+        hello_wire(1), auth_wire(2, KID1, good_auth),
+        sealed(sk1, 0, "REQ", 3, CMD_PING, 0, ping_payload(1))[:-1] + b"\x00"]))
+    dialogues.append(dlg("auth_replayed_counter", A(keys=[(K1, "my-mac")]), lambda: [
+        hello_wire(1), auth_wire(2, KID1, good_auth),
+        sealed(sk1, 0, "REQ", 3, CMD_PING, 0, ping_payload(1)),
+        sealed(sk1, 0, "REQ", 4, CMD_PING, 0, ping_payload(1))]))
+    dialogues.append(dlg("auth_counter_skipped", A(keys=[(K1, "my-mac")]), lambda: [
+        hello_wire(1), auth_wire(2, KID1, good_auth), sealed(sk1, 1, "REQ", 3, CMD_PING, 0, ping_payload(1))]))
+    dialogues.append(dlg("auth_wrong_session_key", A(keys=[(K1, "my-mac")]), lambda: [
+        hello_wire(1), auth_wire(2, KID1, good_auth), sealed(bytes(32), 0, "REQ", 3, CMD_PING, 0, ping_payload(1))]))
+    dialogues.append(dlg("auth_mac_before_auth", A(keys=[(K1, "my-mac")]), lambda: [
+        hello_wire(1), sealed(sk1, 0, "REQ", 2, CMD_PING, 0, ping_payload(1))]))
+    dialogues.append(dlg("auth_ping_before_hello", A(keys=[(K1, "my-mac")]), lambda: [
+        frame("REQ", 1, CMD_AUTH, 0, tlv(T_KEY_ID, KID1) + tlv(T_PROOF, good_auth))]))
+    dialogues.append(dlg("auth_rng_failure", A(keys=[(K1, "my-mac")], rng_fail=True), lambda: [hello_wire(1)]))
+    out["dialogues"] = dialogues
+    out["constants"] = {"device_id_hex": hx(AUTH_DEVICE_ID), "device_nonce_hex": hx(AUTH_NONCE), "bridge_nonce_hex": hx(BRIDGE_NONCE)}
+    return out
+
 # ---------------------------------------------------------------- geração
 def hx(b: bytes) -> str:
     return b.hex()
@@ -396,6 +707,7 @@ def build():
                          "mode": AGENT_CFG["mode"], "auth": AGENT_CFG["auth"],
                          "max_frame": AGENT_CFG["max_frame"], "nonce_hex": hx(AGENT_CFG["nonce"])}
     v["dialogues"] = dialogues
+    v["auth"] = build_auth_vectors()
     return v
 
 
@@ -518,7 +830,63 @@ def emit_h(v) -> str:
              "v_step_t;\nstatic const v_step_t v_steps[] = {\n" + "".join(step_rows) + "};\n")
     L.append("typedef struct { const char *name; int first; int count; } v_dialogue_t;\n"
              "static const v_dialogue_t v_dialogues[] = {\n" + "".join(dl_rows) + "};\n")
-    L.append("#define V_DIALOGUES_N %d\n\n#endif\n" % len(v["dialogues"]))
+    L.append("#define V_DIALOGUES_N %d\n\n" % len(v["dialogues"]))
+    L.append(emit_auth(v["auth"]))
+    L.append("#endif\n")
+    return "".join(L)
+
+
+def emit_auth(a) -> str:
+    L = ["/* ---- pairing / authentication ---- */\n"]
+    for i, e in enumerate(a["kdf"]):
+        for k in ("code_hex", "psk_hex", "key_id_hex", "cn_hex", "dn_hex", "pair_proof_hex", "auth_proof_hex", "session_key_hex"):
+            L.append(c_bytes(f"v_kdf_{i}_{k[:-4]}", bytes.fromhex(e[k])))
+    L.append("typedef struct { const uint8_t *code; const char *code_text; const uint8_t *psk; const uint8_t *key_id; "
+             "const uint8_t *cn; const uint8_t *dn; const char *label; const uint8_t *pair_proof; const uint8_t *auth_proof; "
+             "const uint8_t *session; } v_kdf_t;\nstatic const v_kdf_t v_kdfs[] = {\n")
+    for i, e in enumerate(a["kdf"]):
+        L.append(f"  {{v_kdf_{i}_code, {c_str(e['code_text'])}, v_kdf_{i}_psk, v_kdf_{i}_key_id, v_kdf_{i}_cn, v_kdf_{i}_dn, "
+                 f"{c_str(e['label'])}, v_kdf_{i}_pair_proof, v_kdf_{i}_auth_proof, v_kdf_{i}_session_key}},\n")
+    L.append("};\n#define V_KDF_N %d\n\n" % len(a["kdf"]))
+    for i, e in enumerate(a["code_decode"]):
+        L.append(c_bytes(f"v_cd_{i}", bytes.fromhex(e["code_hex"]) if e["code_hex"] else b""))
+    L.append("typedef struct { const char *text; int ok; const uint8_t *code; } v_codedec_t;\nstatic const v_codedec_t v_codedecs[] = {\n")
+    for i, e in enumerate(a["code_decode"]):
+        L.append(f"  {{{c_str(e['text'])}, {1 if e['code_hex'] else 0}, v_cd_{i}}},\n")
+    L.append("};\n#define V_CODEDEC_N %d\n\n" % len(a["code_decode"]))
+    c = a["constants"]
+    L.append(c_bytes("v_auth_device_id", bytes.fromhex(c["device_id_hex"])))
+    L.append(c_bytes("v_auth_device_nonce", bytes.fromhex(c["device_nonce_hex"])))
+    step_rows, dl_rows, key_rows = [], [], []
+    for di, d in enumerate(a["dialogues"]):
+        first, kfirst = len(step_rows), len(key_rows)
+        for si, s in enumerate(d["steps"]):
+            L.append(c_bytes(f"v_ad_{di}_{si}_req", bytes.fromhex(s["request_hex"])))
+            L.append(c_bytes(f"v_ad_{di}_{si}_res", bytes.fromhex(s["response_hex"]) if s["response_hex"] else b""))
+            rl = len(s["response_hex"]) // 2 if s["response_hex"] else 0
+            step_rows.append(f"  {{v_ad_{di}_{si}_req, {len(s['request_hex']) // 2}, v_ad_{di}_{si}_res, {rl}, {1 if s['close'] else 0}}},\n")
+        for ki, k in enumerate(d["config"]["keys"]):
+            L.append(c_bytes(f"v_ad_{di}_key{ki}", bytes.fromhex(k["psk_hex"])))
+            key_rows.append(f"  {{v_ad_{di}_key{ki}, {c_str(k['label'])}}},\n")
+        pc = d["config"]["pairing_code_hex"]
+        L.append(c_bytes(f"v_ad_{di}_code", bytes.fromhex(pc) if pc else b""))
+        for ki, k in enumerate(d["store_after"]):
+            L.append(c_bytes(f"v_ad_{di}_after{ki}", bytes.fromhex(k["psk_hex"])))
+        dl_rows.append((di, d, first, kfirst, pc))
+    L.append("typedef struct { const uint8_t *req; size_t req_len; const uint8_t *res; size_t res_len; int close; } v_astep_t;\n"
+             "static const v_astep_t v_asteps[] = {\n" + "".join(step_rows) + "};\n")
+    L.append("typedef struct { const uint8_t *psk; const char *label; } v_akey_t;\nstatic const v_akey_t v_akeys[] = {\n" + "".join(key_rows) + "  {0, 0}};\n")
+    L.append("typedef struct { const char *name; int first; int count; int key_first; int key_count; int pairing_open; "
+             "const uint8_t *code; int rng_fail; int after_count; int pairing_open_after; } v_adlg_t;\nstatic const v_adlg_t v_adlgs[] = {\n")
+    for di, d, first, kfirst, pc in dl_rows:
+        L.append(f"  {{{c_str(d['name'])}, {first}, {len(d['steps'])}, {kfirst}, {len(d['config']['keys'])}, "
+                 f"{1 if d['config']['pairing_open'] else 0}, v_ad_{di}_code, {1 if d['config']['rng_fail'] else 0}, "
+                 f"{len(d['store_after'])}, {1 if d['pairing_open_after'] else 0}}},\n")
+    L.append("};\n#define V_ADLG_N %d\n" % len(a["dialogues"]))
+    L.append("static const uint8_t *const v_aafter[][5] = {\n")
+    for di, d, *_ in dl_rows:
+        L.append("  {" + ", ".join(f"v_ad_{di}_after{ki}" for ki in range(len(d["store_after"]))) + (", " if d["store_after"] else "") + "0},\n")
+    L.append("};\n")
     return "".join(L)
 
 

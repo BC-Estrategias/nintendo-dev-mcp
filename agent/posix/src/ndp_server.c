@@ -55,15 +55,59 @@ static void reset_session_state(ndp_server *s) {
   s->cur_active = 0;
 }
 
+static void server_keys_changed(void *ctx, const ndp_keystore *keys) {
+  ndp_server *s = (ndp_server *)ctx;
+  slog(s, "[PAIR] paired computers: %d", keys->count);
+  if (s->plat.keys_changed) s->plat.keys_changed(s->plat.ctx, keys);
+}
+
 void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_agent_config *cfg) {
   memset(s, 0, sizeof *s);
   s->plat = *plat;
   s->agent_cfg = *cfg;
+  s->agent_cfg.keys = &s->keys;
+  s->agent_cfg.pairing = &s->pairing;
+  s->agent_cfg.keys_changed = server_keys_changed;
+  s->agent_cfg.keys_ctx = s;
   s->idle_timeout_ms = 120000;
   s->listen_fd = -1;
   s->client_fd = -1;
   ndp_agent_init(&s->agent, cfg);
   ndp_decoder_init(&s->dec, s->rbuf, sizeof s->rbuf, cfg->max_frame);
+}
+
+void ndp_server_set_keys(ndp_server *s, const ndp_keystore *keys) { s->keys = *keys; }
+
+void ndp_server_open_pairing(ndp_server *s, const uint8_t code[NDP_CODE_BYTES], uint32_t duration_ms) {
+  memcpy(s->pairing.code, code, NDP_CODE_BYTES);
+  s->pairing.active = 1;
+  s->pairing.expires_ms = now(s) + duration_ms;
+  slog(s, "[PAIR] window open for %lu s", (unsigned long)(duration_ms / 1000u));
+}
+
+void ndp_server_close_pairing(ndp_server *s) {
+  if (!s->pairing.active) return;
+  s->pairing.active = 0;
+  memset(s->pairing.code, 0, sizeof s->pairing.code);
+  slog(s, "[PAIR] window closed");
+}
+
+uint32_t ndp_server_pairing_remaining_ms(ndp_server *s) {
+  uint64_t n;
+  if (!s->pairing.active) return 0;
+  n = now(s);
+  return n >= s->pairing.expires_ms ? 0 : (uint32_t)(s->pairing.expires_ms - n);
+}
+
+void ndp_server_clear_keys(ndp_server *s) {
+  uint8_t id[16];
+  int had = s->keys.has_device_id;
+  memcpy(id, s->keys.device_id, 16);
+  ndp_keystore_clear(&s->keys);
+  memcpy(s->keys.device_id, id, 16); /* the console keeps its identity, only the pairings go */
+  s->keys.has_device_id = had;
+  slog(s, "[PAIR] all pairings forgotten");
+  if (s->plat.keys_changed) s->plat.keys_changed(s->plat.ctx, &s->keys);
 }
 
 void ndp_server_set_mode(ndp_server *s, ndp_mode mode) {
@@ -164,8 +208,9 @@ static int process_input(ndp_server *s, int *changed) {
         *changed = 1;
         slog(s, "[REQ %lu] %s", (unsigned long)h->request_id, ndp_command_name(h->command));
       }
-      n = ndp_agent_handle(&s->agent, h, ndp_decoder_payload(&s->dec), s->out, sizeof s->out);
+      n = ndp_agent_handle_frame(&s->agent, h, ndp_decoder_payload(&s->dec), ndp_decoder_mac(&s->dec), s->out, sizeof s->out);
       ndp_decoder_release(&s->dec);
+      if (n == NDP_CLOSE) { slog(s, "[ERR] authentication/MAC failure -- closing"); return -1; }
       if (n == NDP_NO_REPLY) continue; /* e.g. a DATA frame of an upload */
       if (n == 0) { slog(s, "[ERR %lu] response did not fit", (unsigned long)s->cur_id); return -1; }
       s->out_len = n;
@@ -310,6 +355,10 @@ int ndp_server_step(ndp_server *s, int timeout_ms) {
   }
   if (s->client_fd >= 0 && now(s) - s->last_activity_ms > s->idle_timeout_ms) {
     close_client(s, "idle timeout");
+    changed = 1;
+  }
+  if (s->pairing.active && now(s) >= s->pairing.expires_ms) {
+    ndp_server_close_pairing(s);
     changed = 1;
   }
   return changed;

@@ -3,6 +3,7 @@
 #ifndef NDP_AGENT_H
 #define NDP_AGENT_H
 
+#include "ndp/ndp_auth.h"
 #include "ndp/ndp_frame.h"
 #include "ndp/ndp_fs.h"
 #include "ndp/ndp_policy.h"
@@ -14,9 +15,16 @@ typedef struct {
   ndp_mode mode;
   const char *auth;          /* "none" | "required" | "paired" */
   uint32_t max_frame;
-  /* Fills n random bytes (used for the HELLO device nonce). */
-  void (*random_bytes)(void *ctx, uint8_t *out, size_t n);
+  /* Fills n random bytes (HELLO device nonce, device id). Returns 0, or non-zero when no SECURE random
+   * source exists: with auth "required" the agent then refuses to start a session (never a weak nonce). */
+  int (*random_bytes)(void *ctx, uint8_t *out, size_t n);
   void *random_ctx;
+  /* Authentication (auth == "required"): key store and pairing window, owned by the platform. */
+  ndp_keystore *keys;
+  ndp_pairing *pairing;
+  /* Called after the key store changed (a computer was paired) so the platform can persist it. */
+  void (*keys_changed)(void *ctx, const ndp_keystore *keys);
+  void *keys_ctx;
   /* Optional. NULL fs => FS commands answer UNSUPPORTED_COMMAND. NULL policy => spec defaults. */
   const ndp_fs_ops *fs;
   const ndp_policy *policy;
@@ -55,22 +63,38 @@ typedef struct {
     char temp[NDP_PATH_MAX + 16];
     ndp_sha256_ctx sha;
   } up;
+  struct {           /* authentication state of this connection */
+    int required;
+    int authed;
+    int fails;
+    uint8_t cn[16], dn[16];   /* HELLO nonces (bridge / console) */
+    uint8_t session[32];
+    uint64_t send_ctr, recv_ctr;
+  } sec;
   uint64_t last_transfer_bytes; /* bytes of the most recently finished transfer */
 } ndp_agent;
 
 void ndp_agent_init(ndp_agent *a, const ndp_agent_config *cfg);
 
 /* Handles one decoded frame and writes exactly one response frame (RES or ERR) into `out`.
+ * `mac` is the 16-byte MAC that followed the payload, or NULL when the frame carried none. After a
+ * successful AUTH every frame in both directions is sealed (spec §4.5): incoming ones are verified
+ * here and every response is sealed before being returned, so `cap` must leave NDP_MAC_SIZE spare bytes.
  * Returns the response length, NDP_NO_REPLY when the frame needs no response (DATA of an upload),
- * or 0 if `cap` is too small. */
-size_t ndp_agent_handle(ndp_agent *a, const ndp_header *hdr, const uint8_t *payload, uint8_t *out,
-                        size_t cap);
+ * NDP_CLOSE when the connection must be dropped, or 0 if `cap` is too small. */
+size_t ndp_agent_handle_frame(ndp_agent *a, const ndp_header *hdr, const uint8_t *payload, const uint8_t *mac,
+                              uint8_t *out, size_t cap);
+
+/* Convenience for unauthenticated use (auth "none"): no MAC. */
+size_t ndp_agent_handle(ndp_agent *a, const ndp_header *hdr, const uint8_t *payload, uint8_t *out, size_t cap);
 
 /* Streaming (FS_READ): after ndp_agent_handle returned the RES that starts a transfer,
  * ndp_agent_streaming() is 1 and the platform loop calls ndp_agent_next_frame() to obtain the DATA
  * frames and the final END (or ERR) one at a time. Returns the frame length; 0 when there is no
  * active transfer. `cap` must be at least NDP_HEADER_SIZE + the negotiated max_frame. */
 int ndp_agent_streaming(const ndp_agent *a);
+/* True once the connection completed AUTH. */
+int ndp_agent_authenticated(const ndp_agent *a);
 /* 1 while a download or an upload is in progress (the reply for the current request is not final yet). */
 int ndp_agent_busy(const ndp_agent *a);
 /* Changes the access mode at runtime; dropping to READ_ONLY aborts an active upload. */

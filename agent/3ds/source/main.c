@@ -158,18 +158,13 @@ static void srv_log(void *ctx, const char *line) {
   alog("%s", line);
 }
 
-static void random_bytes(void *ctx, uint8_t *out, size_t n) {
-  static uint32_t x = 0;
-  static bool warned = false;
-  size_t i;
+/* Secure random from the console's PS service. There is deliberately no fallback: a weak nonce would
+ * undermine authentication, so when PS fails the agent reports an error and refuses to pair/authenticate. */
+static int random_bytes(void *ctx, uint8_t *out, size_t n) {
   (void)ctx;
-  if (g_ps_ok && R_SUCCEEDED(PS_GenerateRandomBytes(out, n))) return;
-  if (!warned) { alog("WARN: PS random unavailable, weak nonce"); warned = true; }
-  if (!x) x = (uint32_t)svcGetSystemTick() | 1u;
-  for (i = 0; i < n; i++) {
-    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
-    out[i] = (uint8_t)x;
-  }
+  if (g_ps_ok && R_SUCCEEDED(PS_GenerateRandomBytes(out, n))) return 0;
+  alog("ERR: PS random unavailable");
+  return -1;
 }
 
 static void set_err(const char *fmt, unsigned long v) { snprintf(g_err, sizeof g_err, fmt, v); }

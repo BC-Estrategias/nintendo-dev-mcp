@@ -1,4 +1,4 @@
-add_library(ndp_posix_server STATIC src/ndp_server.c src/ndp_posix_fs.c)
+add_library(ndp_posix_server STATIC src/ndp_server.c src/ndp_posix_fs.c src/ndp_keystore_file.c)
 target_include_directories(ndp_posix_server PUBLIC include)
 target_link_libraries(ndp_posix_server PUBLIC ndp_common)
 

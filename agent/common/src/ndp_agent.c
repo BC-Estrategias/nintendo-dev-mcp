@@ -18,6 +18,7 @@ void ndp_agent_init(ndp_agent *a, const ndp_agent_config *cfg) {
   a->cfg = *cfg;
   if (cfg->policy) a->policy = *cfg->policy;
   else ndp_policy_init_default(&a->policy);
+  a->sec.required = cfg->auth && strcmp(cfg->auth, "required") == 0;
 }
 
 /* Response frames are built with the payload written directly after the header slot. */
@@ -67,8 +68,15 @@ static size_t do_hello(ndp_agent *a, const ndp_header *req, const uint8_t *pl, u
     return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_PROTOCOL, "no common protocol version", 1);
   ndp_agent_fs_close(a); /* a new HELLO starts a clean session */
   memset(device_nonce, 0, sizeof device_nonce);
-  if (a->cfg.random_bytes) a->cfg.random_bytes(a->cfg.random_ctx, device_nonce, sizeof device_nonce);
+  if (a->cfg.random_bytes) {
+    int rc = a->cfg.random_bytes(a->cfg.random_ctx, device_nonce, sizeof device_nonce);
+    if (rc != 0 && a->sec.required) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "no secure random", 0);
+  } else if (a->sec.required) {
+    return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "no secure random", 0);
+  }
   a->hello_done = 1;
+  memcpy(a->sec.cn, nonce, 16);
+  memcpy(a->sec.dn, device_nonce, 16);
   if (cap < NDP_HEADER_SIZE) return 0;
   ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
   ndp_tlv_put_u16(&w, NDP_TAG_PROTOCOL, (uint16_t)chosen);
@@ -78,6 +86,7 @@ static size_t do_hello(ndp_agent *a, const ndp_header *req, const uint8_t *pl, u
   ndp_tlv_put_str(&w, NDP_TAG_AUTH, a->cfg.auth);
   ndp_tlv_put_str(&w, NDP_TAG_MODE, ndp_mode_name(a->cfg.mode));
   ndp_tlv_put_u32(&w, NDP_TAG_MAX_FRAME, a->cfg.max_frame);
+  if (a->sec.required) ndp_agent_hello_auth_fields(a, &w);
   return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
 }
 
@@ -93,8 +102,8 @@ static size_t do_ping(const ndp_header *req, const uint8_t *pl, uint8_t *out, si
   return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
 }
 
-size_t ndp_agent_handle(ndp_agent *a, const ndp_header *req, const uint8_t *payload, uint8_t *out,
-                        size_t cap) {
+static size_t handle_inner(ndp_agent *a, const ndp_header *req, const uint8_t *payload, uint8_t *out,
+                           size_t cap) {
   if (req->version != NDP_PROTOCOL_VERSION)
     return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_PROTOCOL, "unsupported frame version", 1);
   if (a->up.active || a->up.discard) {
@@ -106,8 +115,20 @@ size_t ndp_agent_handle(ndp_agent *a, const ndp_header *req, const uint8_t *payl
   if (!ndp_tlv_validate(payload, req->payload_len))
     return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "malformed payload", 0);
   if (a->xfer.active || a->up.active) return ndp_agent_error(out, cap, req, NDP_ST_BUSY, "transfer in progress", 0);
-  if (req->command == NDP_CMD_HELLO) return do_hello(a, req, payload, out, cap);
+  if (req->command == NDP_CMD_HELLO) {
+    if (a->sec.authed) return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "already authenticated", 0);
+    return do_hello(a, req, payload, out, cap);
+  }
   if (!a->hello_done) return ndp_agent_error(out, cap, req, NDP_ST_HELLO_REQUIRED, "send HELLO first", 0);
+  if (a->sec.required) {
+    if (!a->sec.authed) { /* before AUTH only PAIR and AUTH are served (spec §4.6) */
+      if (req->command == NDP_CMD_PAIR) return ndp_agent_pair(a, req, payload, out, cap);
+      if (req->command == NDP_CMD_AUTH) return ndp_agent_auth(a, req, payload, out, cap);
+      return ndp_agent_error(out, cap, req, NDP_ST_UNAUTHORIZED, "authentication required", 0);
+    }
+    if (req->command == NDP_CMD_PAIR || req->command == NDP_CMD_AUTH)
+      return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "already authenticated", 0);
+  }
   if (req->command == NDP_CMD_PING) return do_ping(req, payload, out, cap);
   if (a->cfg.fs && (req->command == NDP_CMD_FS_LIST || req->command == NDP_CMD_FS_STAT ||
                     req->command == NDP_CMD_FS_READ))
@@ -120,10 +141,40 @@ size_t ndp_agent_handle(ndp_agent *a, const ndp_header *req, const uint8_t *payl
   return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_COMMAND, "unknown command", 0);
 }
 
+size_t ndp_agent_handle_frame(ndp_agent *a, const ndp_header *hdr, const uint8_t *payload, const uint8_t *mac,
+                              uint8_t *out, size_t cap) {
+  size_t n;
+  if (a->sec.authed) {
+    /* every frame must be sealed with the next counter value (spec §4.5) */
+    uint8_t hb[NDP_HEADER_SIZE], expect[NDP_MAC_SIZE];
+    if (!mac || !(hdr->flags & NDP_FLAG_MAC)) return NDP_CLOSE;
+    ndp_header_encode(hdr, hb);
+    ndp_frame_mac(a->sec.session, 32, a->sec.recv_ctr, hb, payload, hdr->payload_len, expect);
+    if (!ndp_ct_equal(expect, mac, NDP_MAC_SIZE)) return NDP_CLOSE;
+    a->sec.recv_ctr++;
+  } else if (mac) {
+    return NDP_CLOSE; /* a MAC before AUTH cannot be verified: protocol violation */
+  }
+  n = handle_inner(a, hdr, payload, out, cap);
+  if (a->sec.authed && n != NDP_NO_REPLY && n != NDP_CLOSE && n != 0) n = ndp_agent_seal(a, out, n, cap);
+  return n;
+}
+
+size_t ndp_agent_handle(ndp_agent *a, const ndp_header *hdr, const uint8_t *payload, uint8_t *out, size_t cap) {
+  return ndp_agent_handle_frame(a, hdr, payload, NULL, out, cap);
+}
+
+int ndp_agent_authenticated(const ndp_agent *a) { return a->sec.authed; }
+
 int ndp_agent_streaming(const ndp_agent *a) { return a->xfer.active; }
 
 size_t ndp_agent_next_frame(ndp_agent *a, uint8_t *out, size_t cap) {
-  return a->xfer.active ? ndp_agent_fs_next_frame(a, out, cap) : 0;
+  size_t n;
+  if (!a->xfer.active) return 0;
+  /* leave room for the MAC of a sealed session */
+  n = ndp_agent_fs_next_frame(a, out, a->sec.authed && cap > NDP_MAC_SIZE ? cap - NDP_MAC_SIZE : cap);
+  if (n && a->sec.authed) n = ndp_agent_seal(a, out, n, cap);
+  return n;
 }
 
 int ndp_agent_busy(const ndp_agent *a) { return a->xfer.active || a->up.active; }

@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define NDP_AGENT_VERSION "0.4.0"
+#define NDP_AGENT_VERSION "0.5.0"
 #define NDP_PROTOCOL_VERSION 1
 #define NDP_HEADER_SIZE 20
 #define NDP_MAC_SIZE 16
@@ -28,6 +28,8 @@ enum ndp_kind {
 enum ndp_command {
   NDP_CMD_HELLO = 0x0001,
   NDP_CMD_PING = 0x0002,
+  NDP_CMD_PAIR = 0x0004,
+  NDP_CMD_AUTH = 0x0005,
   NDP_CMD_FS_LIST = 0x0020,
   NDP_CMD_FS_STAT = 0x0021,
   NDP_CMD_FS_READ = 0x0022,
@@ -100,10 +102,19 @@ enum ndp_tag {
   NDP_TAG_REPLACED = 0x0043,
   NDP_TAG_WRITTEN = 0x0044,
   NDP_TAG_MAX_CHUNK = 0x0045,
-  NDP_TAG_TRASH_PATH = 0x0046
+  NDP_TAG_TRASH_PATH = 0x0046,
+  NDP_TAG_PAIRED_KEYS = 0x0047,
+  NDP_TAG_PAIRING_OPEN = 0x0048,
+  NDP_TAG_DEVICE_ID = 0x0049,
+  NDP_TAG_KEY_ID = 0x004A,
+  NDP_TAG_PROOF = 0x004B,
+  NDP_TAG_LABEL = 0x004C
 };
 
 /* Returned by ndp_agent_handle for frames that need no response (e.g. DATA frames of an upload). */
 #define NDP_NO_REPLY ((size_t)-1)
+/* Returned by ndp_agent_handle_frame when the connection must be closed without a reply
+ * (failed MAC, unsealed frame after AUTH, too many authentication failures). */
+#define NDP_CLOSE ((size_t)-2)
 
 #endif
