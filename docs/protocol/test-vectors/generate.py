@@ -305,6 +305,64 @@ class Access:
         return b + hashlib.sha256(b).digest()
 
 
+# ---- HTTP/WebSocket (spec §15): referência independente (hashlib/base64 da stdlib + montagem de quadros à mão)
+import base64 as _b64
+
+def ws_client_frame(opcode, payload, fin=True, mask=b"\x37\xfa\x21\x3d", rsv=0, masked=True):
+    b0 = (0x80 if fin else 0) | (rsv << 4) | opcode
+    n = len(payload)
+    if n < 126:
+        h = bytes([b0, (0x80 if masked else 0) | n])
+    elif n <= 0xFFFF:
+        h = bytes([b0, (0x80 if masked else 0) | 126]) + struct.pack(">H", n)
+    else:
+        h = bytes([b0, (0x80 if masked else 0) | 127]) + struct.pack(">Q", n)
+    if not masked:
+        return h + payload
+    return h + mask + bytes(c ^ mask[i % 4] for i, c in enumerate(payload))
+
+
+def build_ws_vectors():
+    out = {"sha1": [], "base64": [], "accept": [], "ws": []}
+    msgs = [b"", b"abc", b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", b"a" * 1000]
+    msgs += [bytes((i * 7 + j) & 0xFF for j in range(i)) for i in (1, 55, 56, 57, 63, 64, 65, 119, 120, 128, 129)]
+    for m in msgs:
+        out["sha1"].append({"msg_hex": hx(m), "digest_hex": hashlib.sha1(m).hexdigest()})
+    for m in [b"", b"f", b"fo", b"foo", b"foob", b"fooba", b"foobar", bytes(range(20)), bytes(range(256))[:31]]:
+        out["base64"].append({"in_hex": hx(m), "text": _b64.b64encode(m).decode()})
+    for key in ["dGhlIHNhbXBsZSBub25jZQ==", "x3JJHMbDL1EzLkh9GBhXDw==", "AQIDBAUGBwgJCgsMDQ4PEA=="]:
+        acc = _b64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+        out["accept"].append({"key": key, "accept": acc})
+
+    def case(name, frames, data=b"", pings=b"", result=("need", 0)):
+        out["ws"].append({"name": name, "stream_hex": hx(b"".join(frames)), "data_hex": hx(data), "pings_hex": hx(pings),
+                          "result": result[0], "code": result[1]})
+    for n in (0, 1, 125, 126, 127, 65535, 65536, 70000):
+        pl = bytes((i * 31 + 5) & 0xFF for i in range(n))
+        case(f"binary_{n}", [ws_client_frame(2, pl)], data=pl)
+    a, b, c = b"first-", b"second-", b"third"
+    case("fragmented_with_ping", [ws_client_frame(2, a, fin=False), ws_client_frame(9, b"hi"), ws_client_frame(0, b, fin=False),
+                                  ws_client_frame(0, c, fin=True)], data=a + b + c, pings=b"hi")
+    case("two_messages", [ws_client_frame(2, b"one"), ws_client_frame(2, b""), ws_client_frame(2, b"two")], data=b"onetwo")
+    case("pong_ignored", [ws_client_frame(10, b"x"), ws_client_frame(2, b"ok")], data=b"ok")
+    case("ping_max", [ws_client_frame(9, bytes(range(125)))], pings=bytes(range(125)))
+    case("close_1000", [ws_client_frame(2, b"before"), ws_client_frame(8, struct.pack(">H", 1000) + b"bye")], data=b"before", result=("close", 1000))
+    case("close_empty", [ws_client_frame(8, b"")], result=("close", 1005))
+    case("err_unmasked", [ws_client_frame(2, b"abc", masked=False)], result=("error", 1002))
+    case("err_text", [ws_client_frame(1, b"abc")], result=("error", 1003))
+    case("err_reserved_bit", [ws_client_frame(2, b"abc", rsv=4)], result=("error", 1002))
+    case("err_unknown_opcode", [ws_client_frame(3, b"abc")], result=("error", 1002))
+    case("err_continuation_alone", [ws_client_frame(0, b"abc")], result=("error", 1002))
+    case("err_binary_inside_fragmented", [ws_client_frame(2, b"a", fin=False), ws_client_frame(2, b"b")], data=b"a", result=("error", 1002))
+    case("err_fragmented_control", [ws_client_frame(9, b"a", fin=False)], result=("error", 1002))
+    case("err_control_too_long", [ws_client_frame(9, bytes(126))], result=("error", 1002))
+    hdr_only = bytes([0x82, 0x80 | 127]) + struct.pack(">Q", 70001) + b"\x00\x00\x00\x00"
+    case("err_too_large", [hdr_only], result=("error", 1009))
+    hdr_bad = bytes([0x82, 0x80 | 127]) + struct.pack(">Q", 1 << 63) + b"\x00\x00\x00\x00"
+    case("err_length_msb", [hdr_bad], result=("error", 1002))
+    return out
+
+
 # ---------------------------------------------------------------- agente de referência (M0)
 AGENT_CFG = {
     "platform": "host", "agent_version": "0.1.0", "mode": "READ_ONLY", "auth": "none",
@@ -903,6 +961,7 @@ def build():
                          "max_frame": AGENT_CFG["max_frame"], "nonce_hex": hx(AGENT_CFG["nonce"])}
     v["dialogues"] = dialogues
     v["auth"] = build_auth_vectors()
+    v["web"] = build_ws_vectors()
     return v
 
 
@@ -1054,7 +1113,40 @@ def emit_h(v) -> str:
              "static const v_dialogue_t v_dialogues[] = {\n" + "".join(dl_rows) + "};\n")
     L.append("#define V_DIALOGUES_N %d\n\n" % len(v["dialogues"]))
     L.append(emit_auth(v["auth"]))
+    L.append(emit_web(v["web"]))
     L.append("#endif\n")
+    return "".join(L)
+
+
+def emit_web(w) -> str:
+    L = []
+    for i, e in enumerate(w["sha1"]):
+        L.append(c_bytes(f"v_sha1_m_{i}", bytes.fromhex(e["msg_hex"])))
+    L.append("typedef struct { const uint8_t *msg; size_t len; const char *digest_hex; } v_sha1_t;\nstatic const v_sha1_t v_sha1s[] = {\n")
+    for i, e in enumerate(w["sha1"]):
+        L.append(f"  {{v_sha1_m_{i}, {len(e['msg_hex']) // 2}, {c_str(e['digest_hex'])}}},\n")
+    L.append("};\n#define V_SHA1_N %d\n\n" % len(w["sha1"]))
+    for i, e in enumerate(w["base64"]):
+        L.append(c_bytes(f"v_b64_m_{i}", bytes.fromhex(e["in_hex"])))
+    L.append("typedef struct { const uint8_t *in; size_t len; const char *text; } v_b64_t;\nstatic const v_b64_t v_b64s[] = {\n")
+    for i, e in enumerate(w["base64"]):
+        L.append(f"  {{v_b64_m_{i}, {len(e['in_hex']) // 2}, {c_str(e['text'])}}},\n")
+    L.append("};\n#define V_B64_N %d\n\n" % len(w["base64"]))
+    L.append("typedef struct { const char *key; const char *accept; } v_accept_t;\nstatic const v_accept_t v_accepts[] = {\n")
+    for e in w["accept"]:
+        L.append(f"  {{{c_str(e['key'])}, {c_str(e['accept'])}}},\n")
+    L.append("};\n#define V_ACCEPT_N %d\n\n" % len(w["accept"]))
+    for i, e in enumerate(w["ws"]):
+        L.append(c_bytes(f"v_ws_s_{i}", bytes.fromhex(e["stream_hex"])))
+        L.append(c_bytes(f"v_ws_d_{i}", bytes.fromhex(e["data_hex"])))
+        L.append(c_bytes(f"v_ws_p_{i}", bytes.fromhex(e["pings_hex"])))
+    L.append("typedef struct { const char *name; const uint8_t *stream; size_t len; const uint8_t *data; size_t data_len; "
+             "const uint8_t *pings; size_t pings_len; int kind; int code; } v_ws_t;\nstatic const v_ws_t v_wss[] = {\n")
+    kinds = {"need": 0, "close": 3, "error": 4}
+    for i, e in enumerate(w["ws"]):
+        L.append(f"  {{{c_str(e['name'])}, v_ws_s_{i}, {len(e['stream_hex']) // 2}, v_ws_d_{i}, {len(e['data_hex']) // 2}, "
+                 f"v_ws_p_{i}, {len(e['pings_hex']) // 2}, {kinds[e['result']]}, {e['code']}}},\n")
+    L.append("};\n#define V_WS_N %d\n\n" % len(w["ws"]))
     return "".join(L)
 
 

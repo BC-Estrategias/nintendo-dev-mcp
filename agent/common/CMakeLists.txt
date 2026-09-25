@@ -1,6 +1,6 @@
 add_library(ndp_common STATIC
   src/ndp_sha256.c src/ndp_frame.c src/ndp_tlv.c src/ndp_path.c src/ndp_policy.c src/ndp_agent.c
-  src/ndp_names.c src/ndp_agent_fs.c src/ndp_agent_write.c src/ndp_auth.c src/ndp_agent_auth.c src/ndp_access.c)
+  src/ndp_names.c src/ndp_agent_fs.c src/ndp_agent_write.c src/ndp_auth.c src/ndp_agent_auth.c src/ndp_access.c src/ndp_ws.c)
 target_include_directories(ndp_common PUBLIC include)
 target_include_directories(ndp_common PRIVATE src)
 

@@ -12,6 +12,7 @@
 #include "ndp/ndp_policy.h"
 #include "ndp/ndp_sha256.h"
 #include "ndp/ndp_tlv.h"
+#include "ndp/ndp_ws.h"
 #include "vectors_gen.h"
 
 static int g_checks = 0, g_fail = 0;
@@ -506,6 +507,170 @@ static void test_traversal_and_access(void) {
   }
 }
 
+/* ---- HTTP + WebSocket (spec §15) ---- */
+static int hexval(char c) { return c >= '0' && c <= '9' ? c - '0' : c - 'a' + 10; }
+
+static uint32_t g_rnd = 0x1234567u;
+static uint32_t rnd_next(void) { g_rnd = g_rnd * 1664525u + 1013904223u; return g_rnd >> 8; }
+
+static void test_web(void) {
+  int i, chunk, j;
+  static const int chunks[] = {1, 2, 3, 7, 64, 100000};
+  /* SHA-1 / base64 / accept key against hashlib/base64 (Python) and RFC 6455 */
+  for (i = 0; i < V_SHA1_N; i++) {
+    uint8_t d[20];
+    char hex[41];
+    ndp_sha1(v_sha1s[i].msg, v_sha1s[i].len, d);
+    for (j = 0; j < 20; j++) snprintf(hex + j * 2, 3, "%02x", d[j]);
+    CHECK(strcmp(hex, v_sha1s[i].digest_hex) == 0, "sha1 vector %d (len %zu)", i, v_sha1s[i].len);
+  }
+  for (i = 0; i < V_B64_N; i++) {
+    char out[400];
+    CHECK(ndp_base64_encode(v_b64s[i].in, v_b64s[i].len, out, sizeof out) == strlen(v_b64s[i].text) && strcmp(out, v_b64s[i].text) == 0, "base64 vector %d", i);
+    CHECK(ndp_base64_encode(v_b64s[i].in, v_b64s[i].len, out, strlen(v_b64s[i].text)) == 0, "base64: buffer without room for the NUL is refused");
+  }
+  for (i = 0; i < V_ACCEPT_N; i++) {
+    char acc[29];
+    CHECK(ndp_ws_accept_key(v_accepts[i].key, acc) == 0 && strcmp(acc, v_accepts[i].accept) == 0, "accept key %s", v_accepts[i].key);
+  }
+  { char acc[29];
+    CHECK(ndp_ws_accept_key("short", acc) != 0 && ndp_ws_accept_key("dGhlIHNhbXBsZSBub25jZQ=!", acc) != 0, "malformed keys are refused"); }
+
+  /* frame decoder: every scenario, fed in different chunk sizes */
+  for (i = 0; i < V_WS_N; i++) {
+    const v_ws_t *e = &v_wss[i];
+    for (chunk = 0; chunk < (int)(sizeof chunks / sizeof chunks[0]); chunk++) {
+      static uint8_t data[70100], pings[400], work[70200];
+      size_t got = 0, gotp = 0, pos = 0;
+      int kind = 0, code = 0;
+      ndp_ws_dec d;
+      ndp_ws_dec_init(&d);
+      while (pos < e->len && kind == 0) {
+        size_t n = e->len - pos < (size_t)chunks[chunk] ? e->len - pos : (size_t)chunks[chunk], used = 0, off = 0;
+        memcpy(work, e->stream + pos, n);
+        pos += n;
+        while (off < n && kind == 0) {
+          ndp_ws_event ev = ndp_ws_dec_feed(&d, work + off, n - off, &used);
+          off += used;
+          if (ev.kind == NDP_WS_DATA) { if (got + ev.len <= sizeof data) memcpy(data + got, ev.data, ev.len); got += ev.len; }
+          else if (ev.kind == NDP_WS_PING) { if (gotp + ev.len <= sizeof pings) memcpy(pings + gotp, ev.data, ev.len); gotp += ev.len; }
+          else if (ev.kind == NDP_WS_CLOSE || ev.kind == NDP_WS_ERROR) { kind = ev.kind; code = ev.code; }
+          else if (used == 0) break;
+        }
+      }
+      CHECK(kind == e->kind && (kind == 0 || code == e->code), "ws %s chunk %d: end %d/%d code %d/%d", e->name, chunks[chunk], kind, e->kind, code, e->code);
+      CHECK(got == e->data_len && (got == 0 || memcmp(data, e->data, got) == 0), "ws %s chunk %d: payload (%zu of %zu bytes)", e->name, chunks[chunk], got, e->data_len);
+      CHECK(gotp == e->pings_len && (gotp == 0 || memcmp(pings, e->pings, gotp) == 0), "ws %s chunk %d: pings", e->name, chunks[chunk]);
+    }
+  }
+  { /* server frame headers */
+    uint8_t h[NDP_WS_HEADER_MAX];
+    CHECK(ndp_ws_frame_header(NDP_WS_OP_BINARY, 5, h) == 2 && h[0] == 0x82 && h[1] == 5, "header: short");
+    CHECK(ndp_ws_frame_header(NDP_WS_OP_BINARY, 125, h) == 2 && h[1] == 125, "header: 125");
+    CHECK(ndp_ws_frame_header(NDP_WS_OP_BINARY, 126, h) == 4 && h[1] == 126 && h[2] == 0 && h[3] == 126, "header: 126");
+    CHECK(ndp_ws_frame_header(NDP_WS_OP_BINARY, 65535, h) == 4 && h[2] == 0xFF && h[3] == 0xFF, "header: 65535");
+    CHECK(ndp_ws_frame_header(NDP_WS_OP_BINARY, 65536, h) == 10 && h[1] == 127 && h[7] == 1 && h[9] == 0, "header: 65536");
+    CHECK(ndp_ws_frame_header(NDP_WS_OP_PING, 0, h) == 2 && h[0] == 0x89, "header: ping");
+  }
+
+  /* HTTP request head */
+  {
+    ndp_http_req r;
+    static const char ok[] = "GET /ws?x=1 HTTP/1.1\r\nHost: 192.168.15.3:8080\r\nUpgrade: WebSocket\r\nConnection: keep-alive, Upgrade\r\n"
+                             "Origin: http://192.168.15.3:8080\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    size_t n = sizeof ok - 1;
+    CHECK(ndp_http_parse(ok, n, &r) == NDP_HTTP_OK && r.method == NDP_HTTP_GET && strcmp(r.path, "/ws") == 0 && r.upgrade_websocket &&
+              strcmp(r.host, "192.168.15.3:8080") == 0 && r.ws_version == 13 && strcmp(r.ws_key, "dGhlIHNhbXBsZSBub25jZQ==") == 0 && r.head_len == n,
+          "a browser's WebSocket upgrade");
+    CHECK(ndp_http_host_ok(&r, "192.168.15.3") && ndp_http_origin_ok(&r), "host and origin match the console's address");
+    for (i = 1; i < (int)n; i++) CHECK(ndp_http_parse(ok, (size_t)i, &r) == NDP_HTTP_NEED_MORE, "a truncated head (%d bytes) needs more", i);
+    { /* the parser stops at the blank line even when more bytes (a pipelined request) follow */
+      static const char next[] = "GET /x HTTP/1.1\r\nHost: a\r\n\r\n";
+      static char two[sizeof ok + sizeof next];
+      memcpy(two, ok, n); memcpy(two + n, next, sizeof next - 1);
+      CHECK(ndp_http_parse(two, n + sizeof next - 1, &r) == NDP_HTTP_OK && r.head_len == n, "head_len ends at the first blank line");
+    }
+    /* Host / Origin decisions */
+#define HOST_CASE(text, ip, want) do { static const char q[] = "GET / HTTP/1.1\r\n" text "\r\n\r\n"; ndp_http_req x; \
+      CHECK(ndp_http_parse(q, sizeof q - 1, &x) == NDP_HTTP_OK && (ndp_http_host_ok(&x, ip) && ndp_http_origin_ok(&x)) == (want), "host/origin: %s", text); } while (0)
+    HOST_CASE("Host: 192.168.15.3", "192.168.15.3", 1);
+    HOST_CASE("Host: 192.168.15.3:8080\r\nOrigin: http://192.168.15.3:8080", "192.168.15.3", 1);
+    HOST_CASE("Host: 192.168.15.3:80x", "192.168.15.3", 0);
+    HOST_CASE("Host: 192.168.15.31", "192.168.15.3", 0);
+    HOST_CASE("Host: 192.168.15.3.evil.com", "192.168.15.3", 0);
+    HOST_CASE("Host: evil.com", "192.168.15.3", 0);
+    HOST_CASE("Host: localhost:8080", "192.168.15.3", 0);
+    HOST_CASE("Host: localhost:8080", "127.0.0.1", 1);
+    HOST_CASE("Host: localhost:", "127.0.0.1", 0);
+    HOST_CASE("Host: 192.168.15.3:8080\r\nOrigin: http://evil.com", "192.168.15.3", 0);
+    HOST_CASE("Host: 192.168.15.3:8080\r\nOrigin: https://192.168.15.3:8080", "192.168.15.3", 0);
+    HOST_CASE("Host: 192.168.15.3:8080\r\nOrigin: null", "192.168.15.3", 0);
+    HOST_CASE("Host: 192.168.15.3:8080\r\nOrigin: http://192.168.15.3:8080/", "192.168.15.3", 0);
+    { static const char q[] = "GET / HTTP/1.1\r\n\r\n"; ndp_http_req x;
+      CHECK(ndp_http_parse(q, sizeof q - 1, &x) == NDP_HTTP_OK && !ndp_http_host_ok(&x, "1.2.3.4"), "no Host header: refused"); }
+    /* malformed / refused requests */
+#define BAD(text, want) do { static const char q[] = text; ndp_http_req x; int rc = ndp_http_parse(q, sizeof q - 1, &x); \
+      CHECK(rc == (want), "http %s -> %d (wanted %d)", #want, rc, (want)); } while (0)
+    BAD("GET / HTTP/2.0\r\nHost: a\r\n\r\n", NDP_HTTP_VERSION);
+    BAD("GET / HTTP/1.2\r\nHost: a\r\n\r\n", NDP_HTTP_VERSION);
+    BAD("GET / HTTP/1.1junk\r\nHost: a\r\n\r\n", NDP_HTTP_VERSION);
+    BAD("GET  / HTTP/1.1\r\nHost: a\r\n\r\n", NDP_HTTP_BAD);
+    BAD("GET foo HTTP/1.1\r\nHost: a\r\n\r\n", NDP_HTTP_BAD);
+    BAD("GET\r\n\r\n", NDP_HTTP_BAD);
+    BAD("GET / HTTP/1.1\r\nHost a\r\n\r\n", NDP_HTTP_BAD);
+    BAD("GET / HTTP/1.1\r\nHost : a\r\n\r\n", NDP_HTTP_BAD);
+    BAD("GET / HTTP/1.1\r\n Host: a\r\n\r\n", NDP_HTTP_BAD);
+    BAD("GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n", NDP_HTTP_BAD);
+    BAD("GET / HTTP/1.1\r\nHost: a\x01\r\n\r\n", NDP_HTTP_BAD);
+    BAD("GET / HTTP/1.1\r\nHost: \xc3\xa9\r\n\r\n", NDP_HTTP_BAD);
+    BAD("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhello", NDP_HTTP_BODY);
+    BAD("GET / HTTP/1.1\r\nHost: a\r\nContent-Length: x\r\n\r\n", NDP_HTTP_BAD);
+    BAD("GET / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n", NDP_HTTP_BODY);
+    { ndp_http_req x; static const char q[] = "POST / HTTP/1.1\r\nHost: a\r\n\r\n";
+      CHECK(ndp_http_parse(q, sizeof q - 1, &x) == NDP_HTTP_OK && x.method == NDP_HTTP_OTHER, "other methods parse (the server answers 405)"); }
+    { char big[NDP_HTTP_HEAD_MAX + 64]; ndp_http_req x;
+      memset(big, 'a', sizeof big);
+      memcpy(big, "GET / HTTP/1.1\r\nX: ", 19);
+      CHECK(ndp_http_parse(big, sizeof big, &x) == NDP_HTTP_TOO_LARGE, "a head that never ends is refused at HTTP_HEAD_MAX");
+      memcpy(big, "GET /", 5);
+      memset(big + 5, 'b', 200);
+      memcpy(big + 205, " HTTP/1.1\r\nHost: a\r\n\r\n", 23);
+      CHECK(ndp_http_parse(big, 228, &x) == NDP_HTTP_TOO_LARGE, "a path longer than the limit is refused"); }
+    (void)hexval;
+  }
+
+  /* fuzz: random and mutated inputs must never crash, hang or read out of bounds (run under ASan/UBSan) */
+  {
+    static const char seed[] = "GET /ws HTTP/1.1\r\nHost: 1.2.3.4\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nOrigin: http://1.2.3.4\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    int it;
+#define RND() rnd_next()
+    for (it = 0; it < 60000; it++) {
+      char buf[NDP_HTTP_HEAD_MAX + 100];
+      size_t len = sizeof seed - 1, k;
+      ndp_http_req r;
+      memcpy(buf, seed, len);
+      for (k = RND() % 6; k > 0; k--) buf[RND() % len] = (char)RND();
+      if (RND() % 4 == 0) len = RND() % len;
+      (void)ndp_http_parse(buf, len, &r);
+    }
+    for (it = 0; it < 60000; it++) {
+      uint8_t buf[300];
+      size_t len = RND() % sizeof buf, off = 0, k, used;
+      ndp_ws_dec d;
+      ndp_ws_dec_init(&d);
+      for (k = 0; k < len; k++) buf[k] = (uint8_t)RND();
+      if (len > 2 && RND() % 2) { buf[0] = (uint8_t)(0x80 | (RND() % 11)); buf[1] = (uint8_t)(0x80 | (RND() % 130)); }
+      while (off < len) {
+        ndp_ws_event ev = ndp_ws_dec_feed(&d, buf + off, len - off, &used);
+        off += used;
+        if (ev.kind == NDP_WS_ERROR || ev.kind == NDP_WS_CLOSE) break;
+        if (ev.kind == NDP_WS_NEED && used == 0) break;
+      }
+    }
+    CHECK(1, "fuzz finished without a crash");
+  }
+}
+
 int main(void) {
   test_sha256();
   test_hmac();
@@ -522,6 +687,7 @@ int main(void) {
   test_auth_primitives();
   test_keystore();
   test_auth_dialogues();
+  test_web();
   printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }
