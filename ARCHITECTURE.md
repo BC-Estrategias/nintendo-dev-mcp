@@ -170,6 +170,7 @@ Paths absolutos, `/`, UTF-8, relativos à raiz do SD; a normalização rejeita `
 
 ## 5. Segurança
 - **Build de desenvolvimento (decisão do usuário, 2026-09-24):** enquanto o projeto não for distribuído, o agente abre em `DEVELOPMENT` (escrita só em `/3ds/nintendo-dev-agent`). Desde a v0.5.0 o **pareamento é obrigatório** (`AGENT_AUTH_REQUIRED=1`), então só computadores pareados escrevem. **Antes de qualquer distribuição:** trocar `AGENT_START_MODE` para `NDP_MODE_READ_ONLY` (`agent/3ds/source/main.c`).
+- **Pastas escolhidas pelo dono (v0.6.0, spec §11.1–11.3):** o agente 3DS abre com **só a pasta do próprio agente** liberada. O dono libera outras no console (botão **A** → "Access folders": navega pelo cartão, **Y** alterna fechada → leitura → leitura+escrita; até 6 pastas; salvo em `config/access.bin` com checksum, corrompido = lista vazia). O Bridge descobre o que pode tocar com `ACCESS_INFO` (`ndev access`, `nintendo_device_info`) e navega até pastas fundas por "travessia" (listagem filtrada dos diretórios ancestrais). Nenhum comando de rede altera a lista; as zonas protegidas (`/luma`, `/Nintendo 3DS`, `/boot.firm`…) nunca são graváveis, nem com `/` liberado.
 - Modos: `READ_ONLY` (padrão; nenhuma escrita) → `DEVELOPMENT` (escrita só em `write_roots`) → `FULL` (reservado). Trocar modo só pelo console (botão) ou config no SD — nunca por comando remoto.
 - Nenhum comando (além de HELLO/PAIR/AUTH) sem AUTH; limite de 1 conexão; timeouts em todo estágio; 5 falhas de AUTH/PAIR derrubam a conexão (e fecham a janela de pareamento).
 - **UI/API local:** escuta só em `127.0.0.1`; valida `Host` e `Origin` (defesa contra DNS rebinding e páginas maliciosas que chamem `localhost`); token por sessão; sem CORS aberto. Acesso de outros dispositivos da LAN (ex.: celular) só como opt-in explícito, com token.
@@ -259,7 +260,7 @@ GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imag
 | **M2** *(D)* | `DEVICE_INFO` | `ndev info` mostra modelo, IP, SD, memória |
 | **M3** ✔ | `FS_LIST`, `FS_STAT` | validado no New 3DS (`ndev ls`) |
 | **M4** ✔ | `FS_READ` em streaming | `cat test.txt` = "Hello from Nintendo 3DS" no 3DS real; ~1 MiB/s |
-| **M5** ◐ | `FS_WRITE` atômico + `FS_MKDIR` + modos + proteção de paths ✔ (v0.3.0, testes no Mac); **pareamento/HMAC ✔ (v0.5.0, testes no Mac; a validar no console)** | `from-codex.txt` no SD real (validado sem auth na v0.4.0) |
+| **M5** ◐ | `FS_WRITE` atômico + `FS_MKDIR` + modos + proteção de paths ✔ (v0.3.0, testes no Mac); **pareamento/HMAC ✔ (v0.5.0, validado no console)**; **pastas escolhidas pelo dono ✔ (v0.6.0, testes no Mac; a validar no console)** | `from-codex.txt` no SD real (validado sem auth na v0.4.0) |
 | **M6** ✔ | Servidor MCP (stdio) com 12 ferramentas, descoberta automática, auditoria e sandbox local ([`docs/mcp.md`](docs/mcp.md)) | 13 testes ponta a ponta no Mac; **pendente:** teste com modelo real e com o console real |
 | M7 | `fs_upload/download`, `deploy_homebrew` (hash, backup, temp→rename; estudar `3dslink` antes) | build `.3dsx` do TMC3DS enviado e substituído |
 | M8 | Logs e crashes (+ parser Luma) | "analise o último crash" |

@@ -40,6 +40,7 @@ O endereço do console **não precisa** ser configurado: o servidor usa `--host`
 - **Sandbox local:** upload/download só dentro de `--local-root` (resolve symlinks e `..`); nenhum arquivo local é sobrescrito sem `overwrite_local=true`.
 - **Auditoria:** `~/.config/nintendo-dev/audit.log` (JSON lines: quando, ferramenta, caminhos, ok/status, ms — **nunca o conteúdo**). `--no-audit` desliga.
 - Escritas e deletes **nunca são repetidos** automaticamente após uma falha de conexão (o resultado seria ambíguo); leituras são repetidas uma vez.
+- **Pastas liberadas (agente ≥ 0.6.0):** o assistente só enxerga o que o dono liberou **no console** (botão A → "Access folders"); por padrão, só `/3ds/nintendo-dev-agent`. `nintendo_device_info` lista `readable_folders` e `writable_folders`. Fora delas, `PROTECTED_PATH`, e o assistente deve pedir que a pessoa libere a pasta, não tentar contornar. Os diretórios acima de uma pasta liberada podem ser listados só para navegar (aparece apenas o que leva a ela).
 - **Pareamento (agente ≥ 0.5.0):** o console só atende computadores pareados e sela todos os frames com HMAC. O pareamento é feito **pela pessoa**, uma vez por computador: aperta **Y** no console e roda `ndev pair <ip>` num terminal, digitando o código da tela. O servidor MCP **não tem ferramenta de pareamento** (o modelo nunca vê nem digita o código): sem pareamento, as ferramentas devolvem `UNAUTHORIZED` com essa instrução. A chave fica em `~/.config/nintendo-dev/keys.json` (0600; `$NDEV_KEYS_FILE` muda o caminho). Ver `ARCHITECTURE.md` §4.2.
 
 ## Testes

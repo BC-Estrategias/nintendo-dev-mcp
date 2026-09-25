@@ -78,6 +78,7 @@ mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16
 | 0x0004 | PAIR | M5 ✔ | pareamento (janela aberta no console) |
 | 0x0005 | AUTH | M5 ✔ | prova de posse da chave pareada |
 | 0x0010 | DEVICE_INFO | M2 | |
+| 0x0011 | ACCESS_INFO | M5 ✔ | modo e pastas que o dono liberou (só depois do AUTH) |
 | 0x0020 | FS_LIST | M3 ✔ | lista um diretório (paginado) |
 | 0x0021 | FS_STAT | M3 ✔ | tipo, tamanho, mtime |
 | 0x0022 | FS_READ | M4 ✔ | lê arquivo em streaming |
@@ -158,6 +159,8 @@ ERR carrega, opcionalmente: `0x0001 detail` (str, texto humano curto, **informat
 | 0x004A | key_id | bytes[4] | AUTH REQ; PAIR RES |
 | 0x004B | proof | bytes[32] | PAIR REQ / AUTH REQ |
 | 0x004C | label | str | PAIR REQ (≤ 15 bytes) |
+| 0x004D | read_root | str | ACCESS_INFO RES, repetido: pasta legível (recursivamente) |
+| 0x004E | write_root | str | ACCESS_INFO RES, repetido: pasta gravável (subconjunto de read_root) |
 
 ## 8. Ordem de validação de um frame recebido pelo agent
 Depois que o decoder entrega um frame, o agent avalia **nesta ordem** e responde ao primeiro problema:
@@ -203,6 +206,24 @@ Padrões: `read_roots = ["/"]`; `write_roots = ["/3ds/nintendo-dev-agent"]`;
 `never_write = ["/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private", "/3ds/nintendo-dev-agent/config"]`;
 `never_read = ["/3ds/nintendo-dev-agent/config"]` (política e chaves).
 Um root ou zona pode ser um arquivo (`/boot.firm`). A configuração só é alterada com confirmação física no console (ver `ARCHITECTURE.md`); o protocolo NÃO tem comando para isso.
+
+Os padrões acima são os de `ndp_policy_init_default` (e do agente de teste). **O agente do 3DS não os usa:** ele monta a política a partir da lista do dono (§11.2), cujo padrão é *só a pasta do próprio agente*.
+
+### 11.1 Travessia (navegar até uma pasta liberada)
+Se as raízes de leitura estão fundas (`/roms/gba`), o cliente precisa conseguir descer até elas. Por isso `FS_STAT` e `FS_LIST` (e só eles; nunca `FS_READ` nem escrita) aceitam também um diretório que seja **ancestral próprio** de alguma `read_root` e **não** esteja numa zona `never_read`:
+- `FS_STAT` responde normalmente (é um diretório).
+- `FS_LIST` responde só com as entradas `e` para as quais `visível(e)` vale: `e` está dentro de alguma `read_root` (e fora de `never_read`) **ou** `e` também é ancestral próprio de uma `read_root`. O resto do diretório (arquivos, pastas irmãs, `/luma`…) não aparece. Como a varredura filtrada lê entradas que não mostra (no 3DS cada uma custa ~10 ms), o agente lê no máximo **64 entradas por resposta** (`NDP_TRAVERSAL_SCAN_MAX`); uma resposta pode, então, vir com poucas entradas (até nenhuma) e `list_more = 1` — o cliente segue o `next_cursor` até `list_more = 0`.
+- Qualquer outro caminho fora das raízes continua `PROTECTED_PATH`. A travessia não dá acesso ao conteúdo de nada.
+Vetores: `traverse` em `vectors.json` (`travessível`/`visível` por configuração e caminho; inclui uma raiz dentro de `never_read`, que nunca serve de caminho).
+
+### 11.2 Lista de pastas do dono
+Quem escolhe o que é liberado é a pessoa **no console** (botão A → "Access folders"; nenhum comando do protocolo altera isto). A lista tem até **6 entradas** `{caminho normalizado, nível}`, nível `READ` ou `WRITE` (`WRITE` implica `READ`), e vira a política assim: `read_roots = [/3ds/nintendo-dev-agent] + todas as entradas`; `write_roots = [/3ds/nintendo-dev-agent] + entradas WRITE`; `never_*` = padrões (§11). A pasta do agente é sempre liberada.
+- Um nível só pode ser concedido se o caminho não estiver numa zona protegida: `READ` fora de `never_read`, `WRITE` fora de `never_write` (senão `PROTECTED_PATH`). Conceder `WRITE` em `/` é possível, e as zonas `never_write` continuam valendo dentro dele.
+- Ciclo do botão Y numa pasta: nenhum → leitura → leitura+escrita → nenhum, pulando níveis já concedidos por uma pasta-mãe e os proibidos.
+- Arquivo `/3ds/nintendo-dev-agent/config/access.bin`: `"NDPA"`, versão 1, `count u8`, 2 bytes zero, depois `count × {nível u8, len u8, caminho}` e o SHA-256 de tudo antes. Qualquer inconsistência (checksum, nível, caminho não canônico, duplicado, zona proibida) ⇒ **lista vazia** (só a pasta do agente): falha fechada. Escrita atômica (`.tmp` → verificar → `.bak` → rename). Vetores: `access` em `vectors.json` (operações, política resultante e os bytes do arquivo).
+
+### 11.3 ACCESS_INFO (0x0011)
+`REQ {}` → `RES {mode str, read_root str…, write_root str…}` (só depois do AUTH). Serve para o cliente (e o assistente) saber o que pode tocar, em vez de descobrir por erros `PROTECTED_PATH`.
 
 ## 12. Fluxo de recepção (normativo para o decoder)
 Um decoder DEVE: acumular até 20 bytes; validar `magic`; ler `payload_len`; rejeitar `> max_frame` imediatamente; acumular `payload_len` (+16 se MAC); só então entregar o frame. Em erro de magic/flags a conexão é considerada desincronizada e DEVE ser fechada (não há ressincronização).

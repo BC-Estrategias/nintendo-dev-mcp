@@ -122,3 +122,32 @@ $ndev pairings                                         # lista este console
 - No Claude Code/Codex: peça para listar o SD do 3DS. Sem pareamento o modelo deve dizer que **você** precisa parear (ele não tem ferramenta para isso).
 **Coletar:** a tela superior durante o pareamento (foto; **apague a foto depois** — ela mostra o código, que só vale 2 min), o `agent.log`, e os tempos de `ndev pair` e do primeiro `ndev ls` (o pareamento grava no SD).
 
+
+## M5 (parte 3) — pastas escolhidas no console — agente v0.6.0
+
+**O que muda:** o agente agora abre com **só `/3ds/nintendo-dev-agent`** liberada (antes lia o cartão inteiro). Você libera o resto **no próprio 3DS**. Apague a versão anterior do SD, abra a v0.6.0 e confira no log `Loaded 0 opened folder(s)` (ou `Creating ...` se a pasta `config` ainda não existia). O pareamento da v0.5.0 continua valendo.
+
+No Mac:
+```bash
+cd ~/nintendo-dev-mcp; M=bridge/packages/cli/src/main.ts; IP=<IP_DO_3DS>
+node $M access $IP                 # só /3ds/nintendo-dev-agent (leitura e escrita)
+node $M ls $IP /                   # aparece só "3ds" (o único caminho até a pasta liberada)
+node $M ls $IP /roms               # PROTECTED_PATH (ainda fechada)
+```
+**No 3DS:** aperte **A** → abre "Access folders". Setas para mover, **A** entra na pasta, **B** volta, **Y** muda o acesso da linha destacada (`[  ]` fechada → `[R ]` leitura → `[RW]` leitura+escrita → fechada). A linha `.` é a pasta em que você está. Abra, por exemplo, `roms` com **leitura** e `cias` com **escrita**. **START** fecha o menu. A tela principal mostra `Open : agent folder + N more (M writable)`.
+```bash
+node $M access $IP                 # mostra as pastas novas, na hora (sem reiniciar o agente)
+node $M ls $IP /                   # agora também mostra "roms" e "cias"
+node $M ls $IP /roms | head        # funciona
+node $M put $IP --text x /roms/teste.txt    # PROTECTED_PATH: só leitura
+node $M put $IP --text x /cias/teste.txt    # deve funcionar se o modo permitir escrita (X); apague depois: node $M rm $IP /cias/teste.txt
+node $M ls $IP /luma               # PROTECTED_PATH
+```
+**Testes de robustez (no 3DS):**
+- Tente **Y** numa pasta filha de uma já liberada com leitura: a tela mostra `(R )` (herdado) e Y oferece só `[RW]`.
+- Tente **Y** em `luma` ou `Nintendo 3DS`: pode dar leitura, **nunca** escrita (a linha tem `!`).
+- Libere `/` (linha `.` na raiz): a tela principal mostra **WHOLE SD CARD** em vermelho. Volte a fechar.
+- Feche o agente (START) e abra de novo: `Loaded N opened folder(s)` e `access` igual ao que você deixou.
+- Abra 6 pastas e tente a 7ª: `List full`.
+**Coletar:** foto do menu (top e bottom), a saída de `access`/`ls`, e o `agent.log` (linhas `[ACCESS] ...`).
+
