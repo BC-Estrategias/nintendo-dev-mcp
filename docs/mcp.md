@@ -16,6 +16,8 @@ codex mcp add nintendo -- node /Users/macmini/nintendo-dev-mcp/bridge/packages/m
 ```
 Remover: `claude mcp remove nintendo` / `codex mcp remove nintendo`.
 
+*Registrado na máquina do autor em 2026-09-25 (Claude Code: escopo de usuário, `~/.claude.json`; Codex: config global). `claude mcp list` mostra `✔ Connected`. Sessões já abertas precisam ser reiniciadas para enxergar as ferramentas.*
+
 O endereço do console **não precisa** ser configurado: o servidor usa `--host`/`$NDEV_HOST` se houver; senão o último endereço conhecido; senão **varre as sub-redes deste computador** procurando o agente (o IP do 3DS muda por DHCP). Descoberta manual: `ndev find`.
 
 ## Ferramentas
