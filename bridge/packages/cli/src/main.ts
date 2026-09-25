@@ -12,7 +12,7 @@ Usage:
   ndev stat  <host[:port]> <path>                 type, size and mtime
   ndev cat   <host[:port]> <path> [--tail N] [--max N] [--offset N]
                                                   write the file (or a range) to stdout
-  ndev get   <host[:port]> <remote> <local> [--no-verify]
+  ndev get   <host[:port]> <remote> <local> [--no-verify] [--chunk BYTES]
                                                   download a file; verifies SHA-256 unless --no-verify
 
 Paths are absolute on the SD card ("/3ds/nintendo-dev-agent/agent.log"). The default port is ${DEFAULT_PORT}.`;
@@ -137,7 +137,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   // get
-  const { on, rest: pos } = parseFlags(rest, [], ["--no-verify"]);
+  const { flags, on, rest: pos } = parseFlags(rest, ["--chunk"], ["--no-verify"]);
   const [remote, local] = pos;
   if (!remote || !local) throw new Error("get needs <remote> <local>");
   return withClient(target, async (client) => {
@@ -145,7 +145,8 @@ async function main(argv: string[]): Promise<number> {
     let failed: Error | undefined;
     out.on("error", (e) => (failed = e));
     try {
-      const r = await client.read(remote, { verify: !on.has("--no-verify") }, async (chunk) => {
+      const chunk = flags.get("--chunk");
+      const r = await client.read(remote, { verify: !on.has("--no-verify"), ...(chunk ? { chunk } : {}) }, async (chunk) => {
         if (failed) throw failed;
         if (!out.write(chunk)) await once(out, "drain");
       });

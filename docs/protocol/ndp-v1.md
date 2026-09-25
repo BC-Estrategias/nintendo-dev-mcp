@@ -185,5 +185,5 @@ Todos exigem HELLO prévio e passam pela política de leitura (§11) com o `path
 2. Sucesso → `RES {total_size, will_send}` com `will_send = min(length ou ∞, size − offset)`.
 3. Depois, o agent envia **N frames `DATA`** (payload = bytes crus do arquivo, ≤ `chunk`; flag `MORE` em todos menos no último) e por fim um frame **`END`** (payload vazio, ou `{sha256}` se `want_hash = 1`). Todos repetem `request_id` e `command` da REQ. `will_send = 0` → RES seguido direto de END.
 4. Erro no meio (arquivo encolheu, erro de SD) → um frame `ERR` no lugar do `END`; o Bridge descarta o que recebeu.
-5. Durante a transferência o agent responde `BUSY` a qualquer REQ; se a conexão cair, a transferência é abortada e o arquivo fechado.
+5. O Bridge NÃO DEVE enviar REQ antes do `END`/`ERR` da transferência. Se o fizer, o núcleo do agent responde `BUSY` ao REQ (a transferência continua); o servidor de referência (`agent/posix`) simplesmente não lê o socket durante o streaming, então o REQ só é processado depois do fim. Se a conexão cair, a transferência é abortada e o arquivo fechado.
 6. `sha256` cobre exatamente os bytes enviados em DATA.

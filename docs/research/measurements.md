@@ -65,6 +65,27 @@ Versão confirmada pelo próprio agente (`ndev hello` → `v0.1.2`).
 
 **Conclusão (confirmada por medição):** o `fflush` por linha no cartão SD custava ~13–14 ms por requisição (~75% do RTT) e causava o pico de ~400 ms. Com o log em buffer, o RTT de rede "quente" é ~2–4 ms. Os picos restantes (30–55 ms, raros) são compatíveis com o redesenho (≤4×/s, ~20 ms) e com o flush periódico; não investigados.
 
+## 2026-09-24 — M3+M4 no hardware (agente v0.2.0, SD real com ~54 itens na raiz)
+
+**Aceitação do projeto:** `ndev cat <ip> /3ds/nintendo-dev-agent/test.txt` devolveu exatamente `Hello from Nintendo 3DS` (23 bytes, conferido byte a byte). `mtime` é sempre **desconhecido** (0): o `stat` do `sdmc:` não fornece data (como já se via no ftpd).
+
+| Medida | Resultado |
+|---|---|
+| `FS_STAT` no agente | **~16–17 ms** por chamada |
+| `FS_READ` de 23 bytes (agente) | ~19 ms (abrir+ler) |
+| `ndev ls /` (54 entradas) | 517 ms; `ndev ls /3ds` (43 entradas) 459 ms → **~8–10 ms por entrada** (um `stat` cada) |
+| `get` de 49 756 B | 82 ms |
+| `get` de 3,88 MB, chunk 16 KiB | 995 KiB/s |
+| `get` de 3,88 MB, chunk 32 KiB | 1078 KiB/s |
+| `get` de 3,88 MB, chunk ~64 KB | 1082 KiB/s |
+
+Hash SHA-256 conferido contra o agente em todos os downloads.
+
+**Conclusões**
+1. **Vazão de leitura ≈ 1,0–1,1 MiB/s**, quase independente do chunk (16 KiB é ~8% mais lento; 32 e 64 KiB empatam) → **mantido 32 KiB** como padrão. A divisão do gargalo entre SD e Wi-Fi **não está medida** (hipótese: Wi-Fi 2.4 GHz do console). Precisa de um benchmark que separe as duas partes.
+2. **Listar custa ~10 ms por entrada** por causa do `stat` que traz o tamanho. Uma pasta com 500 arquivos levaria ~5 s. Próxima melhoria: tornar o tamanho opcional (`want_size`) e obter o tipo sem `stat` quando o `readdir` informar (não verificado se o `sdmc:` do libctru preenche `d_type`).
+3. O `agent.log` pode ser lido remotamente e reflete o instante atual (flush antes de ler a pasta do agente).
+
 ## Pendências de medição
-- Vazão de leitura/escrita do SD e de rede (chunk 16 vs 64 KiB) — M4/M5.
+- Separar SD × Wi-Fi na vazão de leitura (benchmark); vazão de escrita — M5.
 - Custo de SHA-256 no ARM11.
