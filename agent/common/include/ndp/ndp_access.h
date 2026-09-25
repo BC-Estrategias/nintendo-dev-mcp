@@ -26,8 +26,8 @@ typedef struct {
 
 void ndp_access_init(ndp_access *a);
 
-/* The level `norm` has today: the highest level among the entries that contain it (the workspace counts as
- * WRITE). `*explicit_level` (may be NULL) receives the level of an entry for exactly this path, or NONE. */
+/* The level the agent will really allow on `norm`: the highest level among the entries that contain it (the
+ * workspace counts as WRITE), capped by the protected zones (WRITE never reaches /luma, READ never reaches config). `*explicit_level` (may be NULL) receives the level of an entry for exactly this path, or NONE. */
 ndp_level ndp_access_level(const ndp_access *a, const char *norm, ndp_level *explicit_level);
 
 /* Sets the level of exactly `norm` (NONE removes the entry). Returns NDP_OK, NDP_ST_PATH_INVALID,

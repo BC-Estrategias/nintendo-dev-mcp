@@ -25,8 +25,12 @@ static ndp_level level_from(const ndp_access *a, const char *norm, int skip) {
 
 ndp_level ndp_access_level(const ndp_access *a, const char *norm, ndp_level *explicit_level) {
   int i = find_entry(a, norm);
+  ndp_level eff = level_from(a, norm, -1);
   if (explicit_level) *explicit_level = i >= 0 ? (ndp_level)a->e[i].level : NDP_LVL_NONE;
-  return level_from(a, norm, -1);
+  /* what the agent will really allow: a parent's WRITE does not reach protected zones (spec §11) */
+  if (eff == NDP_LVL_WRITE && !ndp_access_allowed(norm, NDP_LVL_WRITE)) eff = NDP_LVL_READ;
+  if (eff != NDP_LVL_NONE && !ndp_access_allowed(norm, NDP_LVL_READ)) eff = NDP_LVL_NONE;
+  return eff;
 }
 
 /* Uses the constant zone tables: this runs for every row the console draws, and building a policy here would put

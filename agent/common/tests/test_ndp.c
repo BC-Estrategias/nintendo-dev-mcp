@@ -411,6 +411,27 @@ static void test_auth_dialogues(void) {
 }
 
 
+static void test_access_effective_level(void) {
+  ndp_access a;
+  ndp_level ex;
+  ndp_access_init(&a);
+  CHECK(ndp_access_set(&a, "/", NDP_LVL_WRITE) == NDP_OK, "whole card RW");
+  CHECK(ndp_access_level(&a, "/roms", &ex) == NDP_LVL_WRITE, "ordinary folder: RW");
+  CHECK(ndp_access_level(&a, "/luma", &ex) == NDP_LVL_READ, "/luma: only READ despite the parent's RW");
+  CHECK(ndp_access_level(&a, "/luma/payloads/x", &ex) == NDP_LVL_READ, "inside /luma: READ");
+  CHECK(ndp_access_level(&a, "/luma/plugins", &ex) == NDP_LVL_WRITE, "/luma/plugins is an exception: RW");
+  CHECK(ndp_access_level(&a, "/luma/titles/1/romfs", &ex) == NDP_LVL_WRITE, "/luma/titles/...: RW");
+  CHECK(ndp_access_level(&a, "/Nintendo 3DS/x", &ex) == NDP_LVL_READ, "/Nintendo 3DS: READ");
+  CHECK(ndp_access_level(&a, "/boot.firm", &ex) == NDP_LVL_READ, "/boot.firm: READ");
+  CHECK(ndp_access_level(&a, "/3ds/nintendo-dev-agent/config", &ex) == NDP_LVL_NONE, "the agent's config is closed");
+  CHECK(ndp_access_level(&a, "/3ds/nintendo-dev-agent/agent.log", &ex) == NDP_LVL_WRITE, "the agent's workspace: RW");
+  ndp_access_init(&a);
+  CHECK(ndp_access_set(&a, "/", NDP_LVL_READ) == NDP_OK && ndp_access_level(&a, "/luma", &ex) == NDP_LVL_READ &&
+            ndp_access_level(&a, "/roms", &ex) == NDP_LVL_READ && ndp_access_level(&a, "/3ds/nintendo-dev-agent/config", &ex) == NDP_LVL_NONE,
+        "whole card READ");
+  CHECK(ndp_access_level(&a, "/", &ex) == NDP_LVL_READ && ex == NDP_LVL_READ, "the explicit level is reported as set");
+}
+
 static void test_traversal_and_access(void) {
   int i, j;
   for (i = 0; i < V_TRAV_N; i++) {
@@ -496,6 +517,7 @@ int main(void) {
   test_paths();
   test_policy();
   test_traversal_and_access();
+  test_access_effective_level();
   test_dialogues();
   test_auth_primitives();
   test_keystore();
