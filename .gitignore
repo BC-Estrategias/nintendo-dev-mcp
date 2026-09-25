@@ -8,3 +8,6 @@ build-*/
 *.cia
 *.cxi
 .DS_Store
+third_party/
+build-3gx-spike/
+*.3gx
