@@ -84,7 +84,7 @@ mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16
 | 0x0022 | FS_READ | M4 ✔ | lê arquivo em streaming |
 | 0x0030 | FS_WRITE | M5 ✔ | grava um arquivo (temp → validar → rename) |
 | 0x0031 | FS_MKDIR | M5 ✔ | cria um diretório |
-| 0x0032 | FS_RENAME | pós-MVP | |
+| 0x0032 | FS_RENAME | ✔ (1.2.0) | move/renomeia um arquivo ou pasta (nunca sobrescreve) |
 | 0x0033 | FS_DELETE | M5 ✔ | **move** para a lixeira (nunca apaga de verdade) |
 | 0x0040+ | LOG_* / CRASH_* | fase 3 | |
 | 0x8000–0xFFFF | reservado a extensões de plataforma | | |
@@ -167,6 +167,7 @@ ERR carrega, opcionalmente: `0x0001 detail` (str, texto humano curto, **informat
 | 0x0052 / 0x0053 | app_mem_total / app_mem_free | u64 | DEVICE_INFO RES: região de memória do app em primeiro plano (onde o próprio agente roda) |
 | 0x0054 / 0x0055 | sys_mem_total / sys_mem_free | u64 | DEVICE_INFO RES: região SYSTEM |
 | 0x0056 / 0x0057 | sd_total / sd_free | u64 | DEVICE_INFO RES: cartão SD, bytes |
+| 0x0058 | new_path | str | FS_RENAME REQ (destino) e RES (destino normalizado) |
 
 ## 8. Ordem de validação de um frame recebido pelo agent
 Depois que o decoder entrega um frame, o agent avalia **nesta ordem** e responde ao primeiro problema:
@@ -289,3 +290,11 @@ Agent  → RES {written, sha256, replaced}       (ou ERR)
 - A lixeira (`.ndp-trash`) é criada sob demanda (um `mkdir`, que no 3DS leva ~6 s na primeira vez por raiz). Nome de destino = o nome original; se já existir, `<nome>.1`, `<nome>.2`… (o sufixo `.N` não usa `~`, então continua endereçável).
 - `FS_WRITE`/`FS_MKDIR` para dentro de uma lixeira → `PROTECTED_PATH` (a lixeira é gerenciada pelo agent). A leitura funciona normalmente (é como se recupera o conteúdo: ler e/ou o usuário renomear pelo cartão).
 - Falha no `rename` → `IO_ERROR`, item intacto no lugar original.
+
+### FS_RENAME (0x0032)
+`REQ {path, new_path}` → `RES {new_path}`. Move ou renomeia um arquivo ou uma pasta inteira (com o conteúdo) por `rename` (atômico, mesma partição), **sem nunca sobrescrever**.
+- Passa pela política de **escrita** (§11) nas **duas** pontas: `FORBIDDEN_MODE` em `READ_ONLY`; `PROTECTED_PATH` se origem ou destino estão fora das `write_roots` ou numa zona `never_write`; `PATH_INVALID`.
+- `PROTECTED_PATH` também para: uma raiz configurada (`read_roots`/`write_roots`) ou a lixeira (`<raiz>/.ndp-trash`) como **origem**, e qualquer **destino dentro de uma lixeira** (itens só entram na lixeira por `FS_DELETE`). **Sair** da lixeira (restaurar) é um `FS_RENAME` normal.
+- `NOT_FOUND`: origem inexistente ou pasta de destino inexistente (nunca cria pastas). `EXISTS`: o destino já existe, ou origem = destino. `BAD_REQUEST`: `new_path` ausente ou pasta movida para dentro de si mesma.
+- Mudar só a **caixa** do nome (`a` → `A`; o cartão FAT não distingue caixa) é aceito: o agente renomeia em dois passos por um nome temporário `<origem>.ndp-ren` e desfaz se o segundo falhar.
+- Uma falha do SO deixa a origem no lugar (`IO_ERROR`).
