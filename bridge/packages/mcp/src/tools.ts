@@ -47,7 +47,10 @@ export function describeError(e: unknown, host: string | null): string {
       NO_SPACE: "The SD card is full.",
       UNAUTHORIZED: "The console requires pairing.",
     };
-    return `${e.statusName}${e.detail ? ` — ${e.detail}` : ""}. ${hints[e.statusName] ?? ""}`.trim();
+    const hint = hints[e.statusName] ?? "";
+    // the device's own detail is only worth showing when the hint does not already say the same thing
+    const detail = e.detail && !hint.toLowerCase().includes(e.detail.toLowerCase()) ? ` — ${e.detail}` : "";
+    return `${e.statusName}${detail}. ${hint}`.trim();
   }
   if (e instanceof DeviceNotFoundError) return e.message;
   if (e instanceof NdpTransportError)

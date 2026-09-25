@@ -113,6 +113,10 @@ Causa **dentro** do `mkdir` do serviço de arquivos do console: desconhecida. Hi
 
 **Vazão de escrita (2 medidas):** 611 KiB/s (240 KB, um arquivo) e 900 KiB/s (3 MiB).
 
+## 2026-09-25 — servidor MCP contra o console real (agente v0.4.0)
+
+Roteiro de 14 chamadas via `ndev-mcp` (stdio), **sem informar IP** (descoberta automática): tudo funcionou como esperado. Descoberta: **2,1 s** (varredura das sub-redes + HELLO); `ping` 3,1 ms de média (2,5–4,8); `fs_list` 87 ms; `fs_read` 28 ms; `fs_write` de 25 bytes 106 ms; upload de 24 bytes 89 ms; download 30 ms; delete para a lixeira 56–74 ms (a lixeira já existia). `EXISTS` e `PROTECTED_PATH` voltaram com mensagens acionáveis e sem alterar nada. O log de auditoria registrou tudo sem o conteúdo, e o último IP ficou no cache.
+
 ## Pendências de medição
 - Separar SD × Wi-Fi na vazão de leitura (benchmark); **vazão de escrita de arquivo grande**.
 - Por que a primeira escrita da sessão levou 5,8 s (não reproduzida); por que o `mkdir` do sistema demora ~5,7 s.
