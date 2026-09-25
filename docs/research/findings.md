@@ -95,6 +95,8 @@ Verificado no fonte, `meta/ftpd-sys.rsf`, `README.md` e `AGENTS.md` do fork **[c
 - **Comportamento:** headless, sem ícone no Home; inicia o servidor quando o Wi-Fi conecta e derruba quando desconecta; config **somente leitura** em runtime (`/config/ftpd/ftpd.cfg`); thread principal e thread de rede dormem 250 ms quando ociosas para poupar bateria.
 - **Riscos documentados pelo próprio projeto:** sysmodule defeituoso pode impedir o boot (remover o `.cxi` pelo PC).
 
+> **Correção (2026-09-25):** a descrição acima do modo sysmodule vem do README do fork, que lista o CXI como *"(pending)"* (nunca publicado). Lendo o código do Luma, um título **novo** não é iniciado no boot — o Luma só substitui módulos existentes. O modo sysmodule do sys-ftpd está, portanto, **não comprovado** e provavelmente não inicia. Ver [`background-agent.md`](background-agent.md).
+
 ### Implicações para nós (fase futura — não implementar agora)
 | Tema | Achado / hipótese |
 |---|---|

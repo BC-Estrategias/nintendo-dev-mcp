@@ -231,8 +231,7 @@ Não copiar: FTP; C++20/STL/GSL/ImGui/curl/jansson; credencial em texto; escrita
 MVP: IP manual. Para uso por outras pessoas, a descoberta automática **sobe de prioridade** (entra antes do primeiro release público). Formato: **beacon UDP** (Bridge faz broadcast de "NDP-DISCOVER", agent responde com nome/modelo/porta) — muito mais simples que mDNS no libctru (o mDNS do ftpd tem ~600 linhas). Sem descoberta automática no MVP.
 
 ## 11. Background (residente) — visão de roadmap
-Não implementar agora. Requisitos e riscos em `findings.md §2`. Pré-requisito real do loop "deploy → executar → coletar log": um agente que sobreviva ao lançamento do app testado. Duas rotas: sysmodule Luma (estilo sys-ftpd) ou app sob teste com biblioteca cliente que loga ao Mac.
-
+**Investigado em 2026-09-25 ([`docs/research/background-agent.md`](docs/research/background-agent.md)):** o Luma3DS só *substitui* módulos de sistema existentes; não inicia um título novo no boot, e o modo sysmodule do sys-ftpd é não comprovado (CXI "pending"). Um agente sempre ligado exigiria sequestrar o slot de um módulo existente — **não recomendado**. Para o loop de desenvolvimento e o diagnóstico há alternativas sem sysmodule: **GDB do Rosalina** (crash/backtrace pela rede), **`3dslink`** (enviar+executar+`stdout` ao Mac) e o agente atual em primeiro plano para arquivos. Um interruptor no app só faria sentido se surgir um CXI viável.
 ## 12. Crashes/logs (fase 3)
 Luma grava `crash_dump_NNNNNNNN.dmp` em `…/dumps/arm11/` **somente se o usuário apertar A** na tela de exceção; a pasta exata (`/dumps` vs `/luma/dumps`) deve ser confirmada no hardware. Formato conhecido (`ExceptionDumpHeader` + registradores/código/pilha/proc). O Bridge terá parser próprio e usará `addr2line` com o `.elf`/`.map` local; precisamos do endereço-base do 3DSX (a definir). Tools: `logs.list/read`, `crashes.list/latest/read`.
 
