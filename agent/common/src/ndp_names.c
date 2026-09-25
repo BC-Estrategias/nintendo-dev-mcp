@@ -7,6 +7,8 @@ const char *ndp_command_name(uint16_t command) {
     case NDP_CMD_FS_LIST: return "FS_LIST";
     case NDP_CMD_FS_STAT: return "FS_STAT";
     case NDP_CMD_FS_READ: return "FS_READ";
+    case NDP_CMD_FS_WRITE: return "FS_WRITE";
+    case NDP_CMD_FS_MKDIR: return "FS_MKDIR";
     default: return "?";
   }
 }

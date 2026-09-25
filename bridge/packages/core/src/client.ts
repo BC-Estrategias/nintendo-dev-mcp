@@ -1,8 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { stat as statLocal } from "node:fs/promises";
 import { connect as tcpConnect, type Socket } from "node:net";
 import { performance } from "node:perf_hooks";
 import {
-  Command, DEFAULT_CHUNK, DEFAULT_MAX_FRAME, DEFAULT_PORT, FsType, Kind, MIN_CHUNK, PROTOCOL_VERSION, Status, Tag,
+  Command, DEFAULT_CHUNK, DEFAULT_MAX_FRAME, DEFAULT_PORT, Flag, FsType, Kind, MIN_CHUNK, PROTOCOL_VERSION, Status, Tag,
   type Mode, MODES,
 } from "./constants.ts";
 import { NdpProtocolError, NdpRemoteError, NdpTransportError } from "./errors.ts";
@@ -50,6 +52,22 @@ export interface ReadResult {
   bytes: number;
   sha256: Uint8Array | null;
   verified: boolean;
+  ms: number;
+}
+
+export interface WriteOptions {
+  /** Replace an existing file (default false: fails with EXISTS). */
+  overwrite?: boolean;
+  /** With overwrite: keep the previous version as `<name>.bak`. */
+  backup?: boolean;
+  chunk?: number;
+  onProgress?: (bytes: number, total: number) => void;
+}
+
+export interface WriteResult {
+  written: number;
+  sha256: Uint8Array;
+  replaced: boolean;
   ms: number;
 }
 
@@ -192,6 +210,28 @@ export class NdpClient {
     });
   }
 
+  /** Writes with backpressure. Never waits on a dead socket: a close/error while waiting rejects. */
+  async #writeFrame(bytes: Uint8Array): Promise<void> {
+    if (this.#failure) throw this.#failure;
+    if (this.#socket.destroyed) throw new NdpTransportError("connection closed");
+    if (this.#socket.write(bytes)) return;
+    await new Promise<void>((resolve, reject) => {
+      const done = (err?: Error) => {
+        this.#socket.off("drain", onDrain);
+        this.#socket.off("close", onClose);
+        this.#socket.off("error", onError);
+        if (err) reject(err);
+        else resolve();
+      };
+      const onDrain = () => done();
+      const onClose = () => done(this.#failure ?? new NdpTransportError("connection closed"));
+      const onError = (e: Error) => done(this.#failure ?? new NdpTransportError(`socket error: ${e.message}`));
+      this.#socket.once("drain", onDrain);
+      this.#socket.once("close", onClose);
+      this.#socket.once("error", onError);
+    });
+  }
+
   #exclusive<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.#chain.then(fn, fn);
     this.#chain = result.catch(() => undefined);
@@ -298,7 +338,7 @@ export class NdpClient {
    * connection for the whole transfer. If anything fails after the RES, the connection is closed
    * (the remaining frames of the stream cannot be skipped safely).
    */
-  read(path: string, opts: ReadOptions, onChunk: (chunk: Uint8Array) => void | Promise<void>): Promise<ReadResult> {
+  async read(path: string, opts: ReadOptions, onChunk: (chunk: Uint8Array) => void | Promise<void>): Promise<ReadResult> {
     const verify = opts.verify ?? true;
     const fields: TlvField[] = [[Tag.PATH, str(normalizePath(path))]];
     if (opts.offset) fields.push([Tag.OFFSET, u64(BigInt(opts.offset))]);
@@ -365,6 +405,92 @@ export class NdpClient {
       o += c.length;
     }
     return { ...r, data, truncated: (opts.offset ?? 0) + r.bytes < r.totalSize };
+  }
+
+  async mkdir(path: string): Promise<void> {
+    await this.request(Command.FS_MKDIR, encodeTlv([[Tag.PATH, str(normalizePath(path))]]));
+  }
+
+  /**
+   * Uploads `size` bytes produced by `chunks` to `path` (temp file + verify + rename on the device).
+   * `sha256` (the digest of the whole content) is sent up front so the device can refuse a corrupt
+   * transfer before touching anything; the digest it computes is checked again here.
+   */
+  async write(
+    path: string,
+    source: { size: number; sha256: Uint8Array; chunks: AsyncIterable<Uint8Array> | Iterable<Uint8Array> },
+    opts: WriteOptions = {},
+  ): Promise<WriteResult> {
+    const fields: TlvField[] = [
+      [Tag.PATH, str(normalizePath(path))],
+      [Tag.SIZE, u64(BigInt(source.size))],
+      [Tag.SHA256, source.sha256],
+    ];
+    if (opts.overwrite) fields.push([Tag.OVERWRITE, u8(1)]);
+    if (opts.backup) fields.push([Tag.BACKUP, u8(1)]);
+    const payload = encodeTlv(fields);
+
+    return this.#exclusive(async () => {
+      const t0 = performance.now();
+      const id = this.#sendRequest(Command.FS_WRITE, payload);
+      const ready = parseTlv((await this.#awaitResponse(id)).payload); // ERR here: nothing was created
+      const maxChunk = Math.min(ready.u32(Tag.MAX_CHUNK) ?? DEFAULT_CHUNK, DEFAULT_MAX_FRAME);
+      const chunkSize = Math.max(MIN_CHUNK, Math.min(opts.chunk ?? DEFAULT_CHUNK, maxChunk));
+      let sent = 0;
+
+      const early = (): NdpRemoteError | undefined => {
+        // the agent aborted (I/O error, ...): stop sending instead of streaming into the void
+        const i = this.#frames.findIndex((f) => f.header.requestId === id && f.header.kind === Kind.ERR);
+        return i >= 0 ? this.#remoteError(this.#frames.splice(i, 1)[0] as Frame) : undefined;
+      };
+      const send = async (bytes: Uint8Array) => {
+        const frame = encodeFrame({
+          kind: Kind.DATA, requestId: id, command: Command.FS_WRITE, payload: bytes,
+          flags: sent + bytes.length < source.size ? Flag.MORE : 0,
+        });
+        await this.#writeFrame(frame);
+        sent += bytes.length;
+        opts.onProgress?.(sent, source.size);
+      };
+
+      for await (const block of source.chunks) {
+        for (let o = 0; o < block.length; o += chunkSize) {
+          const err = early();
+          if (err) throw err;
+          await send(block.subarray(o, Math.min(block.length, o + chunkSize)));
+        }
+      }
+      if (sent !== source.size) {
+        this.close(); // we promised `size` bytes and cannot deliver them: the stream is unusable
+        throw new NdpProtocolError(Status.BAD_REQUEST, `source produced ${sent} bytes, declared ${source.size}`);
+      }
+      const err = early();
+      if (err) throw err;
+      await this.#writeFrame(encodeFrame({ kind: Kind.END, requestId: id, command: Command.FS_WRITE }));
+
+      const res = parseTlv((await this.#awaitResponse(id)).payload);
+      const written = res.u64(Tag.WRITTEN);
+      const digest = res.first(Tag.SHA256);
+      if (written === undefined || !digest || digest.length !== 32)
+        throw new NdpProtocolError(Status.BAD_REQUEST, "malformed FS_WRITE response");
+      if (Buffer.compare(digest, source.sha256) !== 0 || Number(written) !== source.size)
+        throw new NdpProtocolError(Status.HASH_MISMATCH, "the device reports different content than was sent");
+      return { written: Number(written), sha256: new Uint8Array(digest), replaced: res.u8(Tag.REPLACED) === 1, ms: performance.now() - t0 };
+    });
+  }
+
+  writeBytes(path: string, data: Uint8Array, opts: WriteOptions = {}): Promise<WriteResult> {
+    const sha256 = new Uint8Array(createHash("sha256").update(data).digest());
+    return this.write(path, { size: data.length, sha256, chunks: [data] }, opts);
+  }
+
+  /** Uploads a local file (hashed first so the device can verify it before committing). */
+  async writeFile(path: string, localPath: string, opts: WriteOptions = {}): Promise<WriteResult> {
+    const size = (await statLocal(localPath)).size;
+    const hash = createHash("sha256");
+    for await (const chunk of createReadStream(localPath)) hash.update(chunk as Buffer);
+    const sha256 = new Uint8Array(hash.digest());
+    return this.write(path, { size, sha256, chunks: createReadStream(localPath, { highWaterMark: 64 * 1024 }) as AsyncIterable<Uint8Array> }, opts);
   }
 
   /** Round-trip time in milliseconds; verifies the echoed nonce. */

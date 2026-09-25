@@ -17,6 +17,12 @@
 #include "ndp/ndp_server.h"
 
 #define AGENT_PORT NDP_DEFAULT_PORT
+
+/* DEVELOPMENT BUILD: the agent starts with writes ENABLED (only inside /3ds/nintendo-dev-agent, never in
+ * /Nintendo 3DS, /luma, /boot.firm...). There is no pairing yet, so any device on the LAN could write
+ * there while this mode is on. Switch to NDP_MODE_READ_ONLY before distributing (ARCHITECTURE.md §5).
+ * X toggles the mode at run time. */
+#define AGENT_START_MODE NDP_MODE_DEVELOPMENT
 #define SOC_ALIGN 0x1000
 #define SOC_BUFSIZE 0x100000
 
@@ -247,11 +253,13 @@ static void draw(uint64_t now) {
   }
   if (g_srv.client_fd >= 0) printf("Bridge : " C_GREEN "CONNECTED" C_RESET " %s\n", g_srv.peer);
   else printf("Bridge : not connected\n");
-  printf("Mode   : %s\n", ndp_mode_name(g_srv.agent_cfg.mode));
+  if (g_srv.agent_cfg.mode == NDP_MODE_READ_ONLY) printf("Mode   : " C_GREEN "READ_ONLY" C_RESET " (no writes)\n");
+  else printf("Mode   : " C_YELLOW "%s" C_RESET " (writes on)\n", ndp_mode_name(g_srv.agent_cfg.mode));
+  printf("Write  : /3ds/nintendo-dev-agent\nAuth   : none (dev build)\n");
   hms(up, sizeof up, now - g_start_ms);
   printf("Uptime : %s   Requests: %lu\n", up, (unsigned long)g_srv.requests);
   if (g_err[0]) printf("\n" C_RED "%s" C_RESET "\n", g_err);
-  printf("\n\nSTART = Exit\n");
+  printf("\n\nX = toggle mode    START = Exit\n");
 
   consoleSelect(&g_bot);
   consoleClear();
@@ -296,7 +304,7 @@ int main(void) {
   memset(&cfg, 0, sizeof cfg);
   cfg.platform = "3ds";
   cfg.agent_version = NDP_AGENT_VERSION;
-  cfg.mode = NDP_MODE_READ_ONLY;
+  cfg.mode = AGENT_START_MODE;
   cfg.auth = "none";
   cfg.max_frame = NDP_DEFAULT_MAX_FRAME;
   cfg.random_bytes = random_bytes;
@@ -318,6 +326,12 @@ int main(void) {
     bool changed;
     hidScanInput();
     if (hidKeysDown() & KEY_START) break;
+    if (hidKeysDown() & KEY_X) {
+      ndp_mode next = g_srv.agent_cfg.mode == NDP_MODE_READ_ONLY ? NDP_MODE_DEVELOPMENT : NDP_MODE_READ_ONLY;
+      ndp_server_set_mode(&g_srv, next);
+      alog("Mode -> %s", ndp_mode_name(next));
+      draw_pending = true;
+    }
 
     now = now_ms(NULL);
     changed = service_network(now);

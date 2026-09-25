@@ -18,6 +18,7 @@ cmake -S agent -B build/agent -DCMAKE_BUILD_TYPE=Debug >/dev/null
 cmake --build build/agent
 ./build/agent/common/test_ndp
 ./build/agent/posix/test_fs
+./build/agent/posix/test_write
 
 echo "==> TypeScript bridge"
 (cd bridge && npm install --no-audit --no-fund >/dev/null && npx tsc -p tsconfig.json --noEmit && npm test)

@@ -46,7 +46,7 @@ typedef struct {
   size_t out_len, out_off;
 
   /* Input received but not yet decoded (a recv may carry several frames). */
-  uint8_t in[4096];
+  uint8_t in[16384];
   size_t in_len, in_pos;
 
   /* Bookkeeping for the request currently being answered (for the [OK]/[ERR] log line). */
@@ -61,6 +61,9 @@ void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_a
 /* Starts listening on `s_addr` (network byte order) and `port` (0 = ephemeral). Closes any previous
  * listener/client first. Returns 0, or a negative errno-style value. */
 int ndp_server_listen(ndp_server *s, uint32_t s_addr, uint16_t port);
+
+/* Changes the access mode (also for the current connection). Dropping to READ_ONLY aborts an upload. */
+void ndp_server_set_mode(ndp_server *s, ndp_mode mode);
 
 /* Closes the client and the listener. Safe to call at any time. */
 void ndp_server_close(ndp_server *s);

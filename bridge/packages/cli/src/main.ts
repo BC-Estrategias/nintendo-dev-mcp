@@ -14,6 +14,11 @@ Usage:
                                                   write the file (or a range) to stdout
   ndev get   <host[:port]> <remote> <local> [--no-verify] [--chunk BYTES]
                                                   download a file; verifies SHA-256 unless --no-verify
+  ndev put   <host[:port]> <local> <remote> [--replace] [--backup] [--chunk BYTES]
+  ndev put   <host[:port]> --text "content" <remote> [--replace] [--backup]
+                                                  upload (temp file + verify + rename on the device);
+                                                  refuses to overwrite unless --replace
+  ndev mkdir <host[:port]> <path>                 create a directory (the parent must exist)
 
 Paths are absolute on the SD card ("/3ds/nintendo-dev-agent/agent.log"). The default port is ${DEFAULT_PORT}.`;
 
@@ -34,13 +39,20 @@ function human(n: number): string {
 }
 
 /** Parses `--flag value` / `--switch` pairs; unknown flags are an error. */
-function parseFlags(args: string[], valued: string[], switches: string[] = []): { flags: Map<string, number>; on: Set<string>; rest: string[] } {
+function parseFlags(
+  args: string[], valued: string[], switches: string[] = [], strings: string[] = [],
+): { flags: Map<string, number>; on: Set<string>; rest: string[]; text: Map<string, string> } {
   const flags = new Map<string, number>();
+  const text = new Map<string, string>();
   const on = new Set<string>();
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i] as string;
-    if (valued.includes(a)) {
+    if (strings.includes(a)) {
+      const v = args[++i];
+      if (v === undefined) throw new Error(`${a} expects a value`);
+      text.set(a, v);
+    } else if (valued.includes(a)) {
       const n = Number(args[++i]);
       if (!Number.isInteger(n) || n < 0) throw new Error(`${a} expects a non-negative integer`);
       flags.set(a, n);
@@ -48,7 +60,7 @@ function parseFlags(args: string[], valued: string[], switches: string[] = []): 
     else if (a.startsWith("-") && a.length > 1) throw new Error(`unknown option ${a}`);
     else rest.push(a);
   }
-  return { flags, on, rest };
+  return { flags, on, rest, text };
 }
 
 async function withClient<T>(target: string, fn: (c: NdpClient, host: string, port: number) => Promise<T>): Promise<T> {
@@ -68,7 +80,7 @@ async function main(argv: string[]): Promise<number> {
     console.log(USAGE);
     return cmd ? 0 : 2;
   }
-  if (!["hello", "ping", "ls", "stat", "cat", "get"].includes(cmd) || !target) {
+  if (!["hello", "ping", "ls", "stat", "cat", "get", "put", "mkdir"].includes(cmd) || !target) {
     console.error(USAGE);
     return 2;
   }
@@ -132,6 +144,34 @@ async function main(argv: string[]): Promise<number> {
       const r = await client.readBytes(path, { offset, maxBytes: flags.get("--max") ?? 8 * 1024 * 1024 });
       process.stdout.write(r.data);
       if (r.truncated) console.error(`\n[truncated: read ${r.bytes} of ${r.totalSize} bytes; use --max/--offset/--tail or 'get']`);
+      return 0;
+    });
+  }
+
+  if (cmd === "mkdir") {
+    const path = parseFlags(rest, []).rest[0];
+    if (!path) throw new Error("mkdir needs a <path>");
+    return withClient(target, async (client) => {
+      await client.mkdir(path);
+      console.log(`created ${path}`);
+      return 0;
+    });
+  }
+
+  if (cmd === "put") {
+    const { flags, on, rest: pos, text } = parseFlags(rest, ["--chunk"], ["--replace", "--backup"], ["--text"]);
+    const inline = text.get("--text");
+    const [local, remote] = inline !== undefined ? [undefined, pos[0]] : [pos[0], pos[1]];
+    if (!remote || (inline === undefined && !local)) throw new Error("put needs <local> <remote> (or --text \"...\" <remote>)");
+    const chunk = flags.get("--chunk");
+    const opts = { overwrite: on.has("--replace"), backup: on.has("--backup"), ...(chunk ? { chunk } : {}) };
+    return withClient(target, async (client) => {
+      const r = inline !== undefined
+        ? await client.writeBytes(remote, new TextEncoder().encode(inline), opts)
+        : await client.writeFile(remote, local as string, opts);
+      const kib = r.ms > 0 ? (r.written / 1024 / (r.ms / 1000)).toFixed(0) : "-";
+      console.log(`${inline !== undefined ? "(text)" : local} -> ${remote}: ${r.written} bytes in ${r.ms.toFixed(0)} ms (${kib} KiB/s)${r.replaced ? " [replaced existing file]" : ""}`);
+      console.log(`sha256 ${Buffer.from(r.sha256).toString("hex")} (verified by the device)`);
       return 0;
     });
   }

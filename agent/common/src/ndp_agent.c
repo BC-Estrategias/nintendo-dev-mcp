@@ -97,16 +97,25 @@ size_t ndp_agent_handle(ndp_agent *a, const ndp_header *req, const uint8_t *payl
                         size_t cap) {
   if (req->version != NDP_PROTOCOL_VERSION)
     return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_PROTOCOL, "unsupported frame version", 1);
+  if (a->up.active || a->up.discard) {
+    if ((req->kind == NDP_KIND_DATA || req->kind == NDP_KIND_END) && req->request_id == a->up.id)
+      return ndp_agent_upload_frame(a, req, payload, out, cap);
+    if (a->up.discard && req->kind == NDP_KIND_REQ) a->up.discard = 0; /* a new request resynchronizes */
+  }
   if (req->kind != NDP_KIND_REQ) return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "expected REQ", 0);
   if (!ndp_tlv_validate(payload, req->payload_len))
     return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "malformed payload", 0);
-  if (a->xfer.active) return ndp_agent_error(out, cap, req, NDP_ST_BUSY, "transfer in progress", 0);
+  if (a->xfer.active || a->up.active) return ndp_agent_error(out, cap, req, NDP_ST_BUSY, "transfer in progress", 0);
   if (req->command == NDP_CMD_HELLO) return do_hello(a, req, payload, out, cap);
   if (!a->hello_done) return ndp_agent_error(out, cap, req, NDP_ST_HELLO_REQUIRED, "send HELLO first", 0);
   if (req->command == NDP_CMD_PING) return do_ping(req, payload, out, cap);
   if (a->cfg.fs && (req->command == NDP_CMD_FS_LIST || req->command == NDP_CMD_FS_STAT ||
                     req->command == NDP_CMD_FS_READ))
     return ndp_agent_fs_handle(a, req, payload, out, cap);
+  if (a->cfg.fs && a->cfg.fs->file_create) {
+    if (req->command == NDP_CMD_FS_WRITE) return ndp_agent_write_start(a, req, payload, out, cap);
+    if (req->command == NDP_CMD_FS_MKDIR) return ndp_agent_mkdir(a, req, payload, out, cap);
+  }
   return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_COMMAND, "unknown command", 0);
 }
 
@@ -116,4 +125,14 @@ size_t ndp_agent_next_frame(ndp_agent *a, uint8_t *out, size_t cap) {
   return a->xfer.active ? ndp_agent_fs_next_frame(a, out, cap) : 0;
 }
 
-void ndp_agent_close(ndp_agent *a) { ndp_agent_fs_close(a); }
+int ndp_agent_busy(const ndp_agent *a) { return a->xfer.active || a->up.active; }
+
+void ndp_agent_set_mode(ndp_agent *a, ndp_mode mode) {
+  a->cfg.mode = mode;
+  if (mode == NDP_MODE_READ_ONLY && a->up.active && a->cfg.fs) ndp_agent_upload_abort(a, 1);
+}
+
+void ndp_agent_close(ndp_agent *a) {
+  if (a->cfg.fs && a->up.active) ndp_agent_upload_abort(a, 0);
+  ndp_agent_fs_close(a);
+}

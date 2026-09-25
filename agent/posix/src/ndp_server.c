@@ -66,6 +66,11 @@ void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_a
   ndp_decoder_init(&s->dec, s->rbuf, sizeof s->rbuf, cfg->max_frame);
 }
 
+void ndp_server_set_mode(ndp_server *s, ndp_mode mode) {
+  s->agent_cfg.mode = mode;
+  ndp_agent_set_mode(&s->agent, mode);
+}
+
 static void close_client(ndp_server *s, const char *reason) {
   if (s->client_fd < 0) return;
   ndp_agent_close(&s->agent); /* releases an open directory / aborts a transfer */
@@ -127,7 +132,7 @@ static void finish_current(ndp_server *s) {
   if (!s->cur_active) return;
   s->cur_active = 0;
   ms = now(s) - s->cur_t0;
-  if (s->cur_cmd == NDP_CMD_FS_READ && s->agent.last_transfer_bytes > 0) {
+  if ((s->cur_cmd == NDP_CMD_FS_READ || s->cur_cmd == NDP_CMD_FS_WRITE) && s->agent.last_transfer_bytes > 0) {
     unsigned long kbps = ms ? (unsigned long)(s->agent.last_transfer_bytes * 1000u / 1024u / ms) : 0;
     slog(s, "[OK %lu] %lu bytes %lu ms %lu KiB/s", (unsigned long)s->cur_id,
          (unsigned long)s->agent.last_transfer_bytes, (unsigned long)ms, kbps);
@@ -150,26 +155,29 @@ static int process_input(ndp_server *s, int *changed) {
       const ndp_header *h = ndp_decoder_header(&s->dec);
       ndp_header rh;
       size_t n;
-      s->cur_active = 1;
-      s->cur_id = h->request_id;
-      s->cur_cmd = h->command;
-      s->cur_t0 = now(s);
-      slog(s, "[REQ %lu] %s", (unsigned long)h->request_id, ndp_command_name(h->command));
+      if (h->kind == NDP_KIND_REQ) {
+        s->cur_active = 1;
+        s->cur_id = h->request_id;
+        s->cur_cmd = h->command;
+        s->cur_t0 = now(s);
+        s->requests++;
+        *changed = 1;
+        slog(s, "[REQ %lu] %s", (unsigned long)h->request_id, ndp_command_name(h->command));
+      }
       n = ndp_agent_handle(&s->agent, h, ndp_decoder_payload(&s->dec), s->out, sizeof s->out);
       ndp_decoder_release(&s->dec);
-      s->requests++;
-      *changed = 1;
+      if (n == NDP_NO_REPLY) continue; /* e.g. a DATA frame of an upload */
       if (n == 0) { slog(s, "[ERR %lu] response did not fit", (unsigned long)s->cur_id); return -1; }
       s->out_len = n;
       s->out_off = 0;
       if (ndp_header_decode(s->out, &rh) == NDP_OK && rh.kind == NDP_KIND_ERR) {
-        slog(s, "[ERR %lu] %s", (unsigned long)s->cur_id, ndp_status_name(rh.status));
+        slog(s, "[ERR %lu] %s", (unsigned long)rh.request_id, ndp_status_name(rh.status));
         s->cur_active = 0;
       }
       { /* try to send right away: most responses fit the socket buffer */
         int f = flush_out(s);
         if (f < 0) return -1;
-        if (f == 0 && !ndp_agent_streaming(&s->agent)) finish_current(s);
+        if (f == 0 && !ndp_agent_busy(&s->agent)) finish_current(s);
       }
     }
   }
@@ -195,7 +203,7 @@ static int pump_output(ndp_server *s, int *changed) {
     }
     break;
   }
-  if (s->out_len == 0 && !ndp_agent_streaming(&s->agent) && s->cur_active) {
+  if (s->out_len == 0 && !ndp_agent_busy(&s->agent) && s->cur_active) {
     finish_current(s);
     *changed = 1;
   }
@@ -224,6 +232,31 @@ static void accept_client(ndp_server *s, int *changed) {
   s->connections_opened++;
   slog(s, "[CONNECT] %s", s->peer);
   *changed = 1;
+}
+
+/* Reads what the client sent (several recv rounds while the buffer keeps filling: uploads are
+ * throughput-bound) and processes it. Closes the client on errors. */
+static void on_readable(ndp_server *s, short ev, int *changed) {
+  int rounds = 0;
+  for (;;) {
+    ssize_t r = recv(s->client_fd, s->in, sizeof s->in, 0);
+    if (r == 0) { close_client(s, "peer closed"); *changed = 1; return; }
+    if (r < 0 && !would_block(errno) && errno != EINTR) {
+      slog(s, "[ERR] recv: %s", strerror(errno));
+      close_client(s, "read error");
+      *changed = 1;
+      return;
+    }
+    if (r < 0) {
+      if (ev & (POLLERR | POLLHUP)) { close_client(s, "connection error"); *changed = 1; }
+      return;
+    }
+    s->in_len = (size_t)r;
+    s->in_pos = 0;
+    s->last_activity_ms = now(s);
+    if (process_input(s, changed) < 0) { close_client(s, "protocol/send error"); *changed = 1; return; }
+    if ((size_t)r < sizeof s->in || s->client_fd < 0 || s->out_len || ndp_agent_streaming(&s->agent) || ++rounds >= 4) return;
+  }
 }
 
 int ndp_server_step(ndp_server *s, int timeout_ms) {
@@ -271,21 +304,7 @@ int ndp_server_step(ndp_server *s, int timeout_ms) {
           if (pump_output(s, &changed) < 0) { close_client(s, "send error"); changed = 1; }
         }
       } else {
-        ssize_t r = recv(s->client_fd, s->in, sizeof s->in, 0);
-        if (r == 0) { close_client(s, "peer closed"); changed = 1; }
-        else if (r < 0 && !would_block(errno) && errno != EINTR) {
-          slog(s, "[ERR] recv: %s", strerror(errno));
-          close_client(s, "read error");
-          changed = 1;
-        } else if (r > 0) {
-          s->in_len = (size_t)r;
-          s->in_pos = 0;
-          s->last_activity_ms = now(s);
-          if (process_input(s, &changed) < 0) { close_client(s, "protocol/send error"); changed = 1; }
-        } else if (ev & (POLLERR | POLLHUP)) {
-          close_client(s, "connection error");
-          changed = 1;
-        }
+        on_readable(s, ev, &changed);
       }
     }
   }

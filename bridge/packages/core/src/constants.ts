@@ -18,6 +18,8 @@ export const Command = {
   FS_LIST: 0x0020,
   FS_STAT: 0x0021,
   FS_READ: 0x0022,
+  FS_WRITE: 0x0030,
+  FS_MKDIR: 0x0031,
 } as const;
 
 export const FsType = { FILE: 1, DIR: 2 } as const;
@@ -82,6 +84,11 @@ export const Tag = {
   TOTAL_SIZE: 0x003c,
   WILL_SEND: 0x003d,
   LIST_MORE: 0x003e,
+  OVERWRITE: 0x0040,
+  BACKUP: 0x0041,
+  REPLACED: 0x0043,
+  WRITTEN: 0x0044,
+  MAX_CHUNK: 0x0045,
 } as const;
 
 export type Mode = "READ_ONLY" | "DEVELOPMENT" | "FULL";

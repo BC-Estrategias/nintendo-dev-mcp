@@ -55,8 +55,9 @@ mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16
 | 0x0020 | FS_LIST | M3 ✔ | lista um diretório (paginado) |
 | 0x0021 | FS_STAT | M3 ✔ | tipo, tamanho, mtime |
 | 0x0022 | FS_READ | M4 ✔ | lê arquivo em streaming |
-| 0x0030 | FS_WRITE | M5 | |
-| 0x0031/0x0032 | FS_MKDIR / FS_RENAME | pós-MVP | |
+| 0x0030 | FS_WRITE | M5 ✔ | grava um arquivo (temp → validar → rename) |
+| 0x0031 | FS_MKDIR | M5 ✔ | cria um diretório |
+| 0x0032 | FS_RENAME | pós-MVP | |
 | 0x0040+ | LOG_* / CRASH_* | fase 3 | |
 | 0x8000–0xFFFF | reservado a extensões de plataforma | | |
 
@@ -118,6 +119,11 @@ ERR carrega, opcionalmente: `0x0001 detail` (str, texto humano curto, **informat
 | 0x003C | total_size | u64 | FS_READ RES: tamanho total do arquivo |
 | 0x003D | will_send | u64 | FS_READ RES: bytes que virão em DATA |
 | 0x003E | list_more | u8 | FS_LIST RES: 1 = pode haver mais entradas (pedir `next_cursor`), 0 = fim |
+| 0x0040 | overwrite | u8 | FS_WRITE REQ: 0 = nunca sobrescrever (padrão), 1 = substituir |
+| 0x0041 | backup | u8 | FS_WRITE REQ: 1 = manter o arquivo antigo como `<nome>.bak` (só com overwrite = 1) |
+| 0x0043 | replaced | u8 | FS_WRITE RES: 1 = havia um arquivo e foi substituído |
+| 0x0044 | written | u64 | FS_WRITE RES: bytes gravados |
+| 0x0045 | max_chunk | u32 | FS_WRITE RES (pronto): maior payload de DATA aceito |
 
 ## 8. Ordem de validação de um frame recebido pelo agent
 Depois que o decoder entrega um frame, o agent avalia **nesta ordem** e responde ao primeiro problema:
@@ -187,3 +193,26 @@ Todos exigem HELLO prévio e passam pela política de leitura (§11) com o `path
 4. Erro no meio (arquivo encolheu, erro de SD) → um frame `ERR` no lugar do `END`; o Bridge descarta o que recebeu.
 5. O Bridge NÃO DEVE enviar REQ antes do `END`/`ERR` da transferência. Se o fizer, o núcleo do agent responde `BUSY` ao REQ (a transferência continua); o servidor de referência (`agent/posix`) simplesmente não lê o socket durante o streaming, então o REQ só é processado depois do fim. Se a conexão cair, a transferência é abortada e o arquivo fechado.
 6. `sha256` cobre exatamente os bytes enviados em DATA.
+
+## 14. Comandos de escrita (exigem modo DEVELOPMENT ou FULL)
+Passam pela política de **escrita** (§11): `FORBIDDEN_MODE` em `READ_ONLY`; `PROTECTED_PATH` fora das `write_roots` ou dentro de uma zona `never_write`; `PATH_INVALID`. O agent NUNCA cria diretórios implicitamente (o pai deve existir, senão `NOT_FOUND`) e NUNCA apaga nada por pedido do Bridge (não há comando de remoção).
+
+### FS_MKDIR
+`REQ {path}` → `RES {}`. Já existe (arquivo ou diretório) → `EXISTS`.
+
+### FS_WRITE
+Sequência (o Bridge espera o `RES` de "pronto" antes de enviar DATA):
+```
+Bridge → REQ FS_WRITE {path, size, overwrite?, backup?, sha256?}
+Agent  → RES {max_chunk}                       (ou ERR: nada foi criado)
+Bridge → DATA … DATA (MORE em todos menos no último) → END   (mesmo request_id)
+Agent  → RES {written, sha256, replaced}       (ou ERR)
+```
+- `size` (obrigatório) é o total de bytes. `size = 0` → nenhum DATA, só END. Cada DATA ≤ `max_chunk`.
+- `sha256` opcional no REQ = digest esperado; o agent calcula sempre o SHA-256 do que recebeu e o devolve no RES final para o Bridge conferir de ponta a ponta.
+- **Atomicidade:** o agent grava em `<path>.ndp-tmp` (mesmo diretório; sufixo reservado — um `path` que termine em `.ndp-tmp`/`.ndp-old`/`.bak` é `BAD_REQUEST`; um temp antigo deixado por queda de energia é removido). Só no `END`, depois de conferir tamanho e hash e de sincronizar o arquivo, ocorre a troca:
+  1. destino existe e `overwrite = 0` → `EXISTS` (o temp é apagado);
+  2. `overwrite = 1`: o destino vai para `<path>.ndp-old`, o temp vira o destino; se isso falhar o antigo é restaurado; depois o `.ndp-old` é apagado, ou vira `<path>.bak` se `backup = 1`.
+- Falha em qualquer ponto → `ERR`, temp apagado, destino intacto. Após um `ERR` no meio, o agent descarta os DATA restantes desse `request_id` até o `END` ou até o próximo REQ.
+- `size` ≠ bytes recebidos → `BAD_REQUEST`; `sha256` ≠ calculado → `HASH_MISMATCH`.
+- Enquanto o upload está ativo, qualquer outro REQ recebe `BUSY`. Mudar o modo para `READ_ONLY` ou fechar a conexão aborta o upload.

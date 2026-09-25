@@ -167,6 +167,7 @@ Paths absolutos, `/`, UTF-8, relativos à raiz do SD; a normalização rejeita `
 - **Somente SD.** O agent monta apenas `sdmc:`. NAND (CTR/TWL NAND, saves de sistema) está **fora do escopo**: escrever pode brickar e ler expõe dados únicos do console a um LLM. Se um dia for desejado: raiz separada, somente leitura, modo `FULL` + confirmação no console.
 
 ## 5. Segurança
+- **Build de desenvolvimento (decisão do usuário, 2026-09-24):** enquanto o projeto não for distribuído e o pareamento não existir, o agente abre em `DEVELOPMENT` (escrita só em `/3ds/nintendo-dev-agent`). Risco aceito: qualquer aparelho da LAN pode escrever nessa pasta com o modo ligado. **Antes de qualquer distribuição:** trocar `AGENT_START_MODE` para `NDP_MODE_READ_ONLY` (`agent/3ds/source/main.c`) e implementar o pareamento.
 - Modos: `READ_ONLY` (padrão; nenhuma escrita) → `DEVELOPMENT` (escrita só em `write_roots`) → `FULL` (reservado). Trocar modo só pelo console (botão) ou config no SD — nunca por comando remoto.
 - Não aceitar conexão sem pairing; limite de 1 conexão; timeouts em todo estágio; contagem de falhas de AUTH com backoff.
 - **UI/API local:** escuta só em `127.0.0.1`; valida `Host` e `Origin` (defesa contra DNS rebinding e páginas maliciosas que chamem `localhost`); token por sessão; sem CORS aberto. Acesso de outros dispositivos da LAN (ex.: celular) só como opt-in explícito, com token.
@@ -253,11 +254,11 @@ GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imag
 | Marco | Entrega | Prova em hardware |
 |---|---|---|
 | **M0** ✔ | Repo, docs, protocolo escrito ([`docs/protocol/ndp-v1.md`](docs/protocol/ndp-v1.md)), vetores independentes (Python), codec TS + `common` C com testes, host agent, CLI `ndev` | nenhuma (tudo no Mac): `scripts/check.sh` |
-| **M1** *(Etapa C)* | Agent 3DS: Wi-Fi, mostra IP, abre porta, aceita conexão, HELLO+PING. `ndev ping <ip>` | Mac: `ndev ping` → PONG |
+| **M1** ✔ | Agent 3DS: Wi-Fi, IP, porta, HELLO/PING; `ndev ping` | validado no New 3DS (RTT ~4 ms) |
 | **M2** *(D)* | `DEVICE_INFO` | `ndev info` mostra modelo, IP, SD, memória |
-| **M3** *(E)* | `FS_LIST`, `FS_STAT` | `ndev ls /3ds` |
-| **M4** *(F)* | `FS_READ` em streaming | `ndev cat /3ds/nintendo-dev-agent/test.txt` = "Hello from Nintendo 3DS"; arquivo grande sem estourar RAM |
-| **M5** *(G)* | `FS_WRITE` atômico + pairing + modos + proteção de paths | `from-codex.txt` aparece fisicamente no SD; escrita em `/Nintendo 3DS/` é recusada |
+| **M3** ✔ | `FS_LIST`, `FS_STAT` | validado no New 3DS (`ndev ls`) |
+| **M4** ✔ | `FS_READ` em streaming | `cat test.txt` = "Hello from Nintendo 3DS" no 3DS real; ~1 MiB/s |
+| **M5** ◐ | `FS_WRITE` atômico + `FS_MKDIR` + modos + proteção de paths ✔ (v0.3.0, testes no Mac); **pareamento/HMAC ⏳** | `from-codex.txt` no SD real (a testar) |
 | **M6** | Servidor MCP (stdio) com as 6 tools + logs de auditoria | **Teste de aceitação do prompt**: Codex lê `test.txt` e cria `from-codex.txt` |
 | M7 | `fs_upload/download`, `deploy_homebrew` (hash, backup, temp→rename; estudar `3dslink` antes) | build `.3dsx` do TMC3DS enviado e substituído |
 | M8 | Logs e crashes (+ parser Luma) | "analise o último crash" |

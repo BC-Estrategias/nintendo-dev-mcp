@@ -16,8 +16,8 @@ Cada marco que toca o console tem um roteiro aqui. Marque o que passou e **cole 
 ### 2. Abrir e conferir a tela
 | Onde | Esperado |
 |---|---|
-| Superior | `Nintendo Dev Agent  v0.2.0`, `Protocol 1`, `Status: ONLINE` (verde), `IP: 192.168.x.x`, `Port: 6464`, `Bridge: not connected`, `Mode: READ_ONLY` |
-| Inferior | linhas `Nintendo Dev Agent v0.2.0…`, `Console: New 3DS family`, `acInit/psInit/ndmuInit: 0x00000000`, `Wi-Fi connected`, `Network services ready`, `Listening on 192.168.x.x:6464` |
+| Superior | `Nintendo Dev Agent  v0.3.0`, `Protocol 1`, `Status: ONLINE` (verde), `IP: 192.168.x.x`, `Port: 6464`, `Bridge: not connected`, `Mode: READ_ONLY` |
+| Inferior | linhas `Nintendo Dev Agent v0.3.0…`, `Console: New 3DS family`, `acInit/psInit/ndmuInit: 0x00000000`, `Wi-Fi connected`, `Network services ready`, `Listening on 192.168.x.x:6464` |
 
 Se aparecer `NETWORK ERROR` ou algum `0x…` diferente de zero, **pare e me mande a tela** (o código é o diagnóstico).
 
@@ -25,7 +25,7 @@ Se aparecer `NETWORK ERROR` ou algum `0x…` diferente de zero, **pare e me mand
 ```bash
 node bridge/packages/cli/src/main.ts ping <IP_DO_3DS> -c 10
 ```
-Esperado: `Agent: 3ds  v0.2.0  protocol 1  mode READ_ONLY  auth none  max_frame 65536`, dez linhas `PONG`, e a linha `min/avg/max`. **Anote os tempos** (é a nossa primeira medida de latência real). Na tela inferior devem aparecer `[CONNECT]`, `[REQ n] HELLO`, `[OK n]`, `[REQ n] PING`…; a superior mostra `Bridge: CONNECTED`, depois volta a `not connected`.
+Esperado: `Agent: 3ds  v0.3.0  protocol 1  mode READ_ONLY  auth none  max_frame 65536`, dez linhas `PONG`, e a linha `min/avg/max`. **Anote os tempos** (é a nossa primeira medida de latência real). Na tela inferior devem aparecer `[CONNECT]`, `[REQ n] HELLO`, `[OK n]`, `[REQ n] PING`…; a superior mostra `Bridge: CONNECTED`, depois volta a `not connected`.
 
 ### 4. Robustez
 - [ ] Rode o ping duas vezes seguidas (reconexão).
@@ -43,7 +43,7 @@ Esperado: `Agent: 3ds  v0.2.0  protocol 1  mode READ_ONLY  auth none  max_frame 
 Latência sob carga, arquivos grandes, comportamento com jogos em segundo plano, tampa fechada, e o efeito de `NDMU_EnterExclusiveState` em outros recursos do sistema. `aptSetSleepAllowed(false)` impede o modo de espera enquanto o agente roda.
 
 
-## M3 + M4 — leitura de arquivos (`ls`, `stat`, `cat`, `get`) — agente v0.2.0
+## M3 + M4 — leitura de arquivos (`ls`, `stat`, `cat`, `get`) — agente v0.3.0
 
 **Preparação no SD (uma vez):** crie o arquivo `SD:/3ds/nintendo-dev-agent/test.txt` com o texto `Hello from Nintendo 3DS` (teste de aceitação do projeto). Se preferir outro conteúdo, tudo bem — anote qual.
 
@@ -66,3 +66,29 @@ $ndev cat $IP /nao-existe                               # NOT_FOUND
 $ndev cat $IP /3ds                                      # BAD_REQUEST (é diretório)
 ```
 **Coletar:** a saída de tudo acima, incluindo as linhas `[OK …] N bytes X ms Y KiB/s` da tela inferior (ou do `agent.log`).
+
+
+## M5 (parte 1) — escrita — agente v0.3.0
+
+**Atenção: esta é uma build de desenvolvimento.** Ela abre em `DEVELOPMENT` (escrita ligada, **só** em `/3ds/nintendo-dev-agent/`) e ainda **não tem pareamento**: qualquer aparelho da rede pode escrever nessa pasta enquanto o modo estiver ligado. Aperte **X** no 3DS para alternar para `READ_ONLY` (a tela mostra o modo). Antes de qualquer distribuição o padrão volta a ser `READ_ONLY` e o pareamento entra.
+
+No Mac:
+```bash
+ndev="node bridge/packages/cli/src/main.ts"; IP=<IP_DO_3DS>
+$ndev put $IP --text "Codex was here." /3ds/nintendo-dev-agent/from-codex.txt   # teste de aceitação
+$ndev cat $IP /3ds/nintendo-dev-agent/from-codex.txt                            # deve devolver o mesmo texto
+$ndev put $IP --text "outra" /3ds/nintendo-dev-agent/from-codex.txt             # deve FALHAR: EXISTS
+$ndev put $IP --text "outra" /3ds/nintendo-dev-agent/from-codex.txt --replace --backup   # cria from-codex.txt.bak
+$ndev mkdir $IP /3ds/nintendo-dev-agent/inbox
+$ndev put $IP algum-arquivo.bin /3ds/nintendo-dev-agent/inbox/algum-arquivo.bin  # mostra a vazão de escrita
+```
+**Verificação física:** tire o cartão (ou use o `ls`) e confira que `from-codex.txt` existe com o conteúdo certo e que **não sobrou** nenhum `*.ndp-tmp`/`*.ndp-old`.
+
+**Proteções (devem FALHAR):**
+```bash
+$ndev put $IP --text x /luma/teste.txt              # PROTECTED_PATH
+$ndev put $IP --text x /3ds/outro/teste.txt         # PROTECTED_PATH (fora da pasta liberada)
+$ndev put $IP --text x /3ds/nintendo-dev-agent/config/k   # PROTECTED_PATH
+```
+Aperte **X** (modo `READ_ONLY`) e repita o primeiro `put`: deve falhar com `FORBIDDEN_MODE`.
+**Coletar:** a saída de tudo, a tela do agente e as linhas `[OK n] N bytes … KiB/s` (vazão de escrita).
