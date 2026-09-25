@@ -2,11 +2,12 @@
  * development without a console.
  * Usage: ndp-host-agent [--bind ADDR] [--port N] [--mode READ_ONLY|DEVELOPMENT|FULL] [--root DIR]
  *                        [--write-root PATH]... [--idle-ms N] [--once] [-v]
- *                        [--auth required|none] [--keys-file FILE] [--pair-code XXXX-XXXX-XXXX-XXXX] [--pair-ms N]
+ *                        [--web-port N] [--auth required|none] [--keys-file FILE] [--pair-code XXXX-XXXX-XXXX-XXXX] [--pair-ms N]
  * --root DIR serves DIR as the "SD card" (FS_*); without it FS commands are unsupported.
  * --write-root PATH (repeatable) replaces the default writable folder (/3ds/nintendo-dev-agent).
  * --read-root PATH (repeatable) replaces the default readable folder ("/").
  * --access-file FILE loads the owner's folder list (what the console UI edits) and uses it as the policy.
+ * --web-port N serves the embedded web page and its WebSocket on that port (0 = ephemeral; without the flag the page is off).
  * --auth required turns on pairing/HMAC (spec §4); --keys-file persists the paired keys;
  * --pair-code opens the pairing window at start with that code (tests; a real console shows a random one). */
 #define _POSIX_C_SOURCE 200809L
@@ -26,6 +27,7 @@
 #include "ndp/ndp_keystore_file.h"
 #include "ndp/ndp_posix_fs.h"
 #include "ndp/ndp_server.h"
+#include "ndp_web_assets_data.h"
 
 static volatile sig_atomic_t g_stop = 0;
 static void on_signal(int sig) { (void)sig; g_stop = 1; }
@@ -100,6 +102,8 @@ int main(int argc, char **argv) {
   static ndp_policy policy;
   int custom_policy = 0, custom_read = 0;
   const char *access_file = NULL;
+  int web_on = 0, web_port = 0;
+  static ndp_web_assets web_assets;
   static ndp_access access;
   const char *pair_code = NULL;
   unsigned pair_ms = 600000;
@@ -130,6 +134,7 @@ int main(int argc, char **argv) {
       else if (!strcmp(a, "none")) cfg.auth = "none";
       else { fprintf(stderr, "bad --auth\n"); return 2; }
     }
+    else if (!strcmp(argv[i], "--web-port") && i + 1 < argc) { web_port = atoi(argv[++i]); web_on = 1; }
     else if (!strcmp(argv[i], "--keys-file") && i + 1 < argc) g_keys_file = argv[++i];
     else if (!strcmp(argv[i], "--pair-code") && i + 1 < argc) pair_code = argv[++i];
     else if (!strcmp(argv[i], "--pair-ms") && i + 1 < argc) pair_ms = (unsigned)atoi(argv[++i]);
@@ -203,8 +208,17 @@ int main(int argc, char **argv) {
 
   rc = ndp_server_listen(&srv, ia.s_addr, (uint16_t)port);
   if (rc < 0) { fprintf(stderr, "listen failed: %d\n", rc); return 1; }
+  if (web_on) {
+    web_assets.index_gz = ndp_web_index_gz;
+    web_assets.index_gz_len = ndp_web_index_gz_len;
+    web_assets.version = ndp_web_version;
+    ndp_server_set_web(&srv, &web_assets);
+    rc = ndp_server_web_listen(&srv, ia.s_addr, (uint16_t)web_port);
+    if (rc < 0) { fprintf(stderr, "web listen failed: %d\n", rc); return 1; }
+  }
   printf("LISTENING %s:%u mode=%s root=%s\n", bind_addr, (unsigned)srv.port, ndp_mode_name(cfg.mode),
          root ? root : "(none)");
+  if (web_on) printf("WEB %s:%u\n", bind_addr, (unsigned)srv.web_port);
   fflush(stdout);
 
   while (!g_stop) {

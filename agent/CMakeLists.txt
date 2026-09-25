@@ -15,6 +15,7 @@ endif()
 
 add_subdirectory(common)
 add_subdirectory(posix)
+add_subdirectory(web)
 add_subdirectory(host)
 
 enable_testing()

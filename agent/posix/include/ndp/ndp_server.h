@@ -1,15 +1,20 @@
-/* Connection handling shared by every platform that has BSD-style sockets (the host agent and
- * the 3DS agent via libctru): one listener, ONE active client, one request at a time.
+/* Connection handling shared by every platform that has BSD-style sockets (the host agent and the 3DS agent via
+ * libctru). Two listeners, several kinds of clients, all non-blocking and served from the platform's main loop:
+ *   - the NDP port: ONE raw NDP client (the CLI / MCP server), one request at a time;
+ *   - the web port (optional): short HTTP requests that fetch the embedded web page, and ONE WebSocket client (the
+ *     page itself) that speaks the very same NDP inside WebSocket binary messages (spec §15).
+ * The raw client and the web client are independent (each has its own agent state and authentication), so opening
+ * the page does not disconnect the MCP server and vice versa.
  *
- * Policy: a new connection REPLACES the current client (a stale connection from a crashed Bridge
- * must never lock the console out). Idle clients are dropped after `idle_timeout_ms`.
- * All sockets are non-blocking; ndp_server_step() is meant to be called from the platform's main
- * loop and never blocks longer than `timeout_ms` (plus bounded send waits). */
+ * Policy: a new connection of a kind REPLACES the current client of that kind (a stale connection from a crashed
+ * Bridge must never lock the console out). Idle clients are dropped after `idle_timeout_ms`.
+ * ndp_server_step() never blocks longer than `timeout_ms` (plus bounded send waits). */
 #ifndef NDP_SERVER_H
 #define NDP_SERVER_H
 
 #include "ndp/ndp_agent.h"
 #include "ndp/ndp_frame.h"
+#include "ndp/ndp_ws.h"
 
 typedef struct {
   void *ctx;
@@ -21,17 +26,85 @@ typedef struct {
   void (*keys_changed)(void *ctx, const ndp_keystore *keys);
 } ndp_server_platform;
 
+/* The page served on the web port (built from web/ into a gzip-compressed HTML by scripts/build-web.py). */
+typedef struct {
+  const uint8_t *index_gz;
+  size_t index_gz_len;
+  const char *version; /* shown in the ETag; "" if unknown */
+} ndp_web_assets;
+
+#define NDP_WEB_HTTP_SLOTS 3
+
+typedef enum { NDP_CONN_NONE = 0, NDP_CONN_NDP = 1, NDP_CONN_WS = 2 } ndp_conn_kind;
+
+/* One NDP-speaking client (raw TCP or WebSocket). */
+typedef struct {
+  int fd;
+  ndp_conn_kind kind;
+  char peer[24];
+  uint64_t last_activity_ms;
+
+  ndp_agent agent;
+  ndp_decoder dec;
+  uint8_t rbuf[NDP_HEADER_SIZE + NDP_DEFAULT_MAX_FRAME + NDP_MAC_SIZE];
+
+  /* Output queue: one frame at a time, sent without blocking (a 64 KiB DATA frame may need several send() calls).
+   * For a WebSocket client the WebSocket header sits right before the frame inside `out`. Stream frames are produced
+   * only when the previous one is fully out. */
+  uint8_t out[NDP_WS_HEADER_MAX + NDP_HEADER_SIZE + NDP_DEFAULT_MAX_FRAME + NDP_MAC_SIZE];
+  size_t out_len, out_off;
+
+  /* Input received but not yet decoded (a recv may carry several frames). */
+  uint8_t in[16384];
+  size_t in_len, in_pos;
+
+  /* WebSocket only */
+  ndp_ws_dec wsd;
+  const uint8_t *pend; /* decoded message bytes not yet fed to the NDP decoder */
+  size_t pend_len;
+  uint8_t ctl[140];    /* a pong or close frame waiting for the frame in flight to finish */
+  size_t ctl_len, ctl_off;
+  int close_after_ctl;
+
+  /* Bookkeeping for the request currently being answered (for the [OK]/[ERR] log line). */
+  int cur_active;
+  uint32_t cur_id;
+  uint16_t cur_cmd;
+  uint64_t cur_t0;
+} ndp_conn;
+
+/* A short HTTP exchange: read the request head, answer, close. */
+typedef struct {
+  int fd;
+  char peer[24];
+  uint64_t started_ms;
+  char head[NDP_HTTP_HEAD_MAX];
+  size_t head_len;
+  char resp[768];
+  size_t resp_len, resp_off;
+  const uint8_t *body;
+  size_t body_len, body_off;
+  int responding;
+} ndp_http_conn;
+
 typedef struct {
   ndp_server_platform plat;
   ndp_agent_config agent_cfg;
   uint32_t idle_timeout_ms;
 
   int listen_fd;
-  int client_fd;
+  int client_fd;        /* the raw NDP client (= nc[0].fd), -1 if none */
   uint32_t listen_addr; /* s_addr, network byte order (0 = INADDR_ANY) */
   uint16_t port;        /* actual listening port, host byte order */
-  char peer[24];        /* "a.b.c.d" of the active client, "" if none */
+  char peer[24];        /* "a.b.c.d" of the raw NDP client, "" if none */
   uint64_t last_activity_ms;
+
+  int web_listen_fd;    /* -1 when the web page is not being served */
+  uint16_t web_port;
+  int web_client_fd;    /* the WebSocket client (= nc[1].fd), -1 if none */
+  char web_peer[24];
+  const ndp_web_assets *web_assets;
+  uint32_t web_requests; /* HTTP pages served */
 
   /* statistics, monotonically increasing */
   uint32_t connections_opened;
@@ -42,24 +115,8 @@ typedef struct {
   ndp_keystore keys;     /* paired computers (persisted by the platform) */
   ndp_pairing pairing;   /* the pairing window (spans connections) */
 
-  ndp_agent agent;
-  ndp_decoder dec;
-  uint8_t rbuf[NDP_HEADER_SIZE + NDP_DEFAULT_MAX_FRAME + NDP_MAC_SIZE];
-
-  /* Output queue: one frame at a time, sent without blocking (a 64 KiB DATA frame may need
-   * several send() calls). Stream frames are produced only when the previous one is fully out. */
-  uint8_t out[NDP_HEADER_SIZE + NDP_DEFAULT_MAX_FRAME + NDP_MAC_SIZE]; /* room for the MAC of sealed frames */
-  size_t out_len, out_off;
-
-  /* Input received but not yet decoded (a recv may carry several frames). */
-  uint8_t in[16384];
-  size_t in_len, in_pos;
-
-  /* Bookkeeping for the request currently being answered (for the [OK]/[ERR] log line). */
-  int cur_active;
-  uint32_t cur_id;
-  uint16_t cur_cmd;
-  uint64_t cur_t0;
+  ndp_conn nc[2];        /* [0] raw NDP, [1] WebSocket */
+  ndp_http_conn http[NDP_WEB_HTTP_SLOTS];
 } ndp_server;
 
 void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_agent_config *cfg);
@@ -67,6 +124,14 @@ void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_a
 /* Starts listening on `s_addr` (network byte order) and `port` (0 = ephemeral). Closes any previous
  * listener/client first. Returns 0, or a negative errno-style value. */
 int ndp_server_listen(ndp_server *s, uint32_t s_addr, uint16_t port);
+
+/* The web page (call before ndp_server_web_listen). NULL disables serving it. */
+void ndp_server_set_web(ndp_server *s, const ndp_web_assets *assets);
+/* Starts/stops the web listener (`port` 0 = ephemeral). 0 or a negative errno-style value. While it is closed,
+ * browsers get connection refused. */
+int ndp_server_web_listen(ndp_server *s, uint32_t s_addr, uint16_t port);
+void ndp_server_web_close(ndp_server *s);
+int ndp_server_web_enabled(const ndp_server *s);
 
 /* Replaces the access policy at run time (the owner edited the allowed folders on the console). It applies to
  * the current connection from its next request on and to every later one. */
