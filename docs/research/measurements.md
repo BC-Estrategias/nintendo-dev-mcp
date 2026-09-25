@@ -25,7 +25,19 @@ Conexão "a frio" (20 s parado; CLI completo, incluindo início do Node): 368–
 4. **Primeira conexão da sessão falhou uma vez com `EHOSTUNREACH`** (ARP do 3DS ainda não resolvido); não reproduziu depois. Correção: o Bridge repete a conexão (3 tentativas, pausa 250/500 ms) para erros transitórios; `ECONNREFUSED` não é repetido.
 5. O 3DS **não responde a ICMP echo** (`ping` comum dá 100% de perda) — não usar `ping` do sistema como teste de vida; usar `ndev ping`.
 
+## 2026-09-24 — M1, agente v0.1.1 (redesenho limitado a 4×/s)
+
+| Teste | Resultado |
+|---|---|
+| 30 pings em sequência (`-i 0`) | **17,5 ms** médio (mín 11,2 / máx 45,5) — antes: 34,6 ms |
+| 30 pings, `-i 100` | 16,8 ms (10,0 / 45,1) |
+| 15 pings, `-i 300` | 92,0 ms (15,1 / 111,4) — economia de energia do rádio, sem mudança |
+| 500 pings em sequência | 0 falhas, médio 19,2 ms (mín 9,9 / **máx 408,7**) — um pico isolado de ~400 ms, não investigado (retransmissão Wi-Fi?) |
+| Nova conexão substitui a anterior | ok: a conexão A recebe `ECONNRESET`, B segue funcionando |
+| 20 reconexões seguidas (connect+hello+ping+close) | 20/20 ok, 57 ms cada |
+
+**Conclusão:** a correção do redesenho reduziu ~17 ms por requisição em sequência (confirmado). O agente ficou estável em 500 requisições e em reconexões rápidas.
+
 ## Pendências de medição
-- RTT após a correção do redesenho (v0.1.1).
 - Vazão de leitura/escrita do SD e de rede (chunk 16 vs 64 KiB) — M4/M5.
 - Custo de SHA-256 no ARM11.
