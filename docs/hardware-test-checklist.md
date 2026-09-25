@@ -7,10 +7,10 @@ Cada marco que toca o console tem um roteiro aqui. Marque o que passou e **cole 
 **Requisitos:** New 3DS com Luma3DS + Homebrew Launcher; 3DS e Mac na **mesma rede Wi-Fi** (sem "isolamento de clientes/AP isolation"; o 3DS só usa 2.4 GHz).
 
 ### 1. Instalar
-- **Cartão SD:** copie `dist/nintendo-dev-agent.3dsx` para `SD:/3ds/nintendo-dev-agent/nintendo-dev-agent.3dsx`.
+- **Cartão SD:** copie `dist/nintendo-dev-agent-vX.Y.Z.3dsx` para `SD:/3ds/nintendo-dev-agent/`. **Apague a versão anterior do SD** (o Homebrew Launcher lista cada `.3dsx`, e o mesmo título apareceria duas vezes). Confira a versão na descrição do app no Launcher e na tela superior do agente.
 - **Ou por Wi-Fi (`3dslink`):** no 3DS abra o Homebrew Launcher e aperte **Y** (netloader; mostra o IP). No Mac:
   ```bash
-  /opt/devkitpro/tools/bin/3dslink -a <IP_DO_3DS> dist/nintendo-dev-agent.3dsx
+  /opt/devkitpro/tools/bin/3dslink -a <IP_DO_3DS> dist/nintendo-dev-agent-vX.Y.Z.3dsx
   ```
 
 ### 2. Abrir e conferir a tela

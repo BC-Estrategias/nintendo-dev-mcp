@@ -48,9 +48,11 @@ jobs:
         run: make -C agent/3ds
       - name: Checksums
         run: |
+          VERSION="$(sed -n 's/^#define NDP_AGENT_VERSION "\(.*\)"$/\1/p' agent/common/include/ndp/ndp_defs.h)"
           mkdir -p dist
-          cp agent/3ds/nintendo-dev-agent.3dsx agent/3ds/nintendo-dev-agent.smdh dist/
-          cd dist && sha256sum nintendo-dev-agent.3dsx nintendo-dev-agent.smdh | tee SHA256SUMS
+          cp agent/3ds/nintendo-dev-agent.3dsx "dist/nintendo-dev-agent-v${VERSION}.3dsx"
+          cp agent/3ds/nintendo-dev-agent.smdh "dist/nintendo-dev-agent-v${VERSION}.smdh"
+          cd dist && sha256sum nintendo-dev-agent-v${VERSION}.3dsx nintendo-dev-agent-v${VERSION}.smdh | tee SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: nintendo-dev-agent-3ds

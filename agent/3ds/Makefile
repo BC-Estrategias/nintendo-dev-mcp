@@ -15,8 +15,10 @@ BUILD       := build
 SOURCES     := source ../common/src ../posix/src
 INCLUDES    := source ../common/include ../posix/include
 
+# The version comes from the single source of truth (shown in the Homebrew Launcher description).
+AGENT_VERSION   := $(shell sed -n 's/^\#define NDP_AGENT_VERSION "\(.*\)"$$/\1/p' $(TOPDIR)/../common/include/ndp/ndp_defs.h)
 APP_TITLE       := Nintendo Dev Agent
-APP_DESCRIPTION := Remote dev agent for AI-assisted homebrew
+APP_DESCRIPTION := v$(AGENT_VERSION) - remote dev agent
 APP_AUTHOR      := BC Estrategias
 
 ARCH    := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
