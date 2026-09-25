@@ -159,3 +159,10 @@ node $M ls $IP /luma               # PROTECTED_PATH
 4. `ndev access <ip>` mostra o mesmo que o menu. Feche `/` se o tiver deixado aberto.
 5. SELECT duas vezes esquece os pareamentos; `ndev pair` de novo funciona.
 
+
+## v1.1.0 — DEVICE_INFO
+```bash
+node bridge/packages/cli/src/main.ts info <ip>
+```
+Esperado: `model` (o seu New 3DS/XL), `firmware` (ex.: `11.17.0-50U`), `RAM 256.0 MiB` (New) ou `128.0 MiB` (Old), memória do app e do sistema, e `SD card X GiB free of Y GiB`. **Anote o tempo do comando**: ler o espaço livre do SD pode levar alguns segundos. Confira o espaço livre com o que o Mac mostra do cartão. Funciona em `READ_ONLY`.
+

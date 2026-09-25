@@ -257,7 +257,7 @@ GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imag
 |---|---|---|
 | **M0** ✔ | Repo, docs, protocolo escrito ([`docs/protocol/ndp-v1.md`](docs/protocol/ndp-v1.md)), vetores independentes (Python), codec TS + `common` C com testes, host agent, CLI `ndev` | nenhuma (tudo no Mac): `scripts/check.sh` |
 | **M1** ✔ | Agent 3DS: Wi-Fi, IP, porta, HELLO/PING; `ndev ping` | validado no New 3DS (RTT ~4 ms) |
-| **M2** *(D)* | `DEVICE_INFO` | `ndev info` mostra modelo, IP, SD, memória |
+| **M2** ✔ | `DEVICE_INFO` (v1.1.0) | `ndev info` mostra modelo, firmware, RAM, SD; validado no console: a testar |
 | **M3** ✔ | `FS_LIST`, `FS_STAT` | validado no New 3DS (`ndev ls`) |
 | **M4** ✔ | `FS_READ` em streaming | `cat test.txt` = "Hello from Nintendo 3DS" no 3DS real; ~1 MiB/s |
 | **M5** ◐ | `FS_WRITE` atômico + `FS_MKDIR` + modos + proteção de paths ✔ (v0.3.0, testes no Mac); **pareamento/HMAC ✔ (v0.5.0, validado no console)**; **pastas escolhidas pelo dono ✔ (v0.6.0, testes no Mac; a validar no console)** | `from-codex.txt` no SD real (validado sem auth na v0.4.0) |

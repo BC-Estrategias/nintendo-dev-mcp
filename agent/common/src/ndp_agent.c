@@ -116,6 +116,34 @@ static size_t do_access_info(ndp_agent *a, const ndp_header *req, uint8_t *out, 
   return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
 }
 
+/* DEVICE_INFO: model, firmware, RAM, memory regions, SD card capacity. Read-only, allowed in every mode. */
+static size_t do_device_info(ndp_agent *a, const ndp_header *req, uint8_t *out, size_t cap) {
+  ndp_device_info di;
+  ndp_tlv_w w;
+  if (!a->cfg.device_info) return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_COMMAND, "unknown command", 0);
+  memset(&di, 0, sizeof di);
+  if (a->cfg.device_info(a->cfg.device_info_ctx, &di) != 0)
+    return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "cannot read device information", 0);
+  if (cap < NDP_HEADER_SIZE) return 0;
+  ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
+  if (di.has & NDP_DI_MODEL) ndp_tlv_put_str(&w, NDP_TAG_MODEL, di.model);
+  if (di.has & NDP_DI_FIRMWARE) ndp_tlv_put_str(&w, NDP_TAG_FIRMWARE, di.firmware);
+  if (di.has & NDP_DI_RAM_TOTAL) ndp_tlv_put_u64(&w, NDP_TAG_RAM_TOTAL, di.ram_total);
+  if (di.has & NDP_DI_APP_MEM) {
+    ndp_tlv_put_u64(&w, NDP_TAG_APP_MEM_TOTAL, di.app_mem_total);
+    ndp_tlv_put_u64(&w, NDP_TAG_APP_MEM_FREE, di.app_mem_free);
+  }
+  if (di.has & NDP_DI_SYS_MEM) {
+    ndp_tlv_put_u64(&w, NDP_TAG_SYS_MEM_TOTAL, di.sys_mem_total);
+    ndp_tlv_put_u64(&w, NDP_TAG_SYS_MEM_FREE, di.sys_mem_free);
+  }
+  if (di.has & NDP_DI_SD) {
+    ndp_tlv_put_u64(&w, NDP_TAG_SD_TOTAL, di.sd_total);
+    ndp_tlv_put_u64(&w, NDP_TAG_SD_FREE, di.sd_free);
+  }
+  return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
+}
+
 static size_t handle_inner(ndp_agent *a, const ndp_header *req, const uint8_t *payload, uint8_t *out,
                            size_t cap) {
   if (req->version != NDP_PROTOCOL_VERSION)
@@ -145,6 +173,7 @@ static size_t handle_inner(ndp_agent *a, const ndp_header *req, const uint8_t *p
   }
   if (req->command == NDP_CMD_PING) return do_ping(req, payload, out, cap);
   if (req->command == NDP_CMD_ACCESS_INFO) return do_access_info(a, req, out, cap);
+  if (req->command == NDP_CMD_DEVICE_INFO) return do_device_info(a, req, out, cap);
   if (a->cfg.fs && (req->command == NDP_CMD_FS_LIST || req->command == NDP_CMD_FS_STAT ||
                     req->command == NDP_CMD_FS_READ))
     return ndp_agent_fs_handle(a, req, payload, out, cap);

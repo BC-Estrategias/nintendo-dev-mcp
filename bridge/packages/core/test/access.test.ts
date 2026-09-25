@@ -168,4 +168,26 @@ suite("owner-chosen folders over TCP", () => {
     assert.match(stdout, /\/roms\/gba\n/);
     assert.match(stdout, /\/cias {3}\(also writable\)/);
   });
+
+  test("DEVICE_INFO: what the platform reports arrives, what it cannot measure is absent (READ_ONLY works too)", async () => {
+    const a = await startAgent(["--root", root, "--mode", "READ_ONLY"]);
+    procs.push(a.proc);
+    const c = await NdpClient.connect({ host: "127.0.0.1", port: a.port });
+    try {
+      await c.hello();
+      const d = await c.deviceInfo();
+      assert.match(d.model ?? "", /^host \(/);
+      assert.ok((d.firmware ?? "").length > 0);
+      assert.ok(d.sd && d.sd.total > 0 && d.sd.free <= d.sd.total, "sd capacity is consistent");
+      assert.equal(d.ramTotal, undefined);
+      assert.equal(d.appMemory, undefined);
+      assert.equal(d.systemMemory, undefined);
+    } finally {
+      c.close();
+    }
+    const { stdout } = await run(process.execPath, [CLI, "info", `127.0.0.1:${a.port}`]);
+    assert.match(stdout, /model +host \(/);
+    assert.match(stdout, /SD card +[\d.]+ GiB free of [\d.]+ GiB/);
+    assert.doesNotMatch(stdout, /RAM/);
+  });
 });

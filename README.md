@@ -11,7 +11,7 @@ AI agent ⇄ MCP (stdio) ⇄ ndev bridge (your computer) ⇄ NDP v1 over TCP/Wi-
 > This drives **real hardware**. Writes modify a real SD card. Read the safety model below before you enable them.
 
 ## What you get
-- **`ndev` CLI** — `find`, `ls`, `cat`, `get`, `put`, `mkdir`, `rm` (moves to a trash folder, never deletes), `pair`, `access`.
+- **`ndev` CLI** — `find`, `info` (model, firmware, memory, SD space), `ls`, `cat`, `get`, `put`, `mkdir`, `rm` (moves to a trash folder, never deletes), `pair`, `access`.
 - **MCP server** (`@ndev/mcp`, 12 tools `nintendo_*`) — device info, list/stat/read/write/mkdir/delete, upload/download to a local sandbox folder, agent log. Auto-discovers the console when its IP changes (DHCP).
 - **3DS agent** — a normal 3DS app (`.3dsx` or `.cia`) with a small on-screen UI.
 

@@ -19,6 +19,7 @@ Usage:
   ndev unpair <host[:port]>                       forget this computer's key for that console
                                                   (to make the console forget ALL computers: its SELECT button)
   ndev pairings                                   list the consoles this computer is paired with
+  ndev info  <host[:port]>                        model, firmware, memory and SD card space of the console
   ndev access <host[:port]>                       the folders the console's owner opened (read / write);
                                                   they are chosen on the console itself (A button)
   ndev hello <host[:port]>                        connect and print the agent's HELLO
@@ -173,9 +174,26 @@ async function main(argv: string[]): Promise<number> {
       client.close();
     }
   }
-  if (!["hello", "ping", "access", "ls", "stat", "cat", "get", "put", "mkdir", "rm"].includes(cmd) || !target) {
+  if (!["hello", "ping", "info", "access", "ls", "stat", "cat", "get", "put", "mkdir", "rm"].includes(cmd) || !target) {
     console.error(USAGE);
     return 2;
+  }
+
+  if (cmd === "info") {
+    return withClient(target, async (client, host) => {
+      const h = client.info!;
+      const d = await client.deviceInfo();
+      const gib = (n: number) => `${(n / 1024 ** 3).toFixed(2)} GiB`;
+      const mib = (n: number) => `${(n / 1024 ** 2).toFixed(1)} MiB`;
+      console.log(`${host}  agent v${h.agentVersion}  mode ${h.mode}`);
+      console.log(`model     ${d.model ?? "unknown"}`);
+      console.log(`firmware  ${d.firmware ?? "unknown"}`);
+      if (d.ramTotal !== undefined) console.log(`RAM       ${mib(d.ramTotal)}`);
+      if (d.appMemory) console.log(`app mem   ${mib(d.appMemory.free)} free of ${mib(d.appMemory.total)} (region of the foreground app)`);
+      if (d.systemMemory) console.log(`sys mem   ${mib(d.systemMemory.free)} free of ${mib(d.systemMemory.total)}`);
+      if (d.sd) console.log(`SD card   ${gib(d.sd.free)} free of ${gib(d.sd.total)} (${((100 * d.sd.free) / d.sd.total).toFixed(0)}% free)`);
+      return 0;
+    });
   }
 
   if (cmd === "access") {

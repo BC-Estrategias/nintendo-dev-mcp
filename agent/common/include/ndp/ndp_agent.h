@@ -9,6 +9,24 @@
 #include "ndp/ndp_policy.h"
 #include "ndp/ndp_sha256.h"
 
+/* What the console reports about itself (DEVICE_INFO). A field is sent only when its bit in `has` is set: the agent
+ * never invents a value for something the platform cannot measure. */
+#define NDP_DI_MODEL (1u << 0)
+#define NDP_DI_FIRMWARE (1u << 1)
+#define NDP_DI_RAM_TOTAL (1u << 2)
+#define NDP_DI_APP_MEM (1u << 3) /* app_mem_total + app_mem_free */
+#define NDP_DI_SYS_MEM (1u << 4) /* sys_mem_total + sys_mem_free */
+#define NDP_DI_SD (1u << 5)      /* sd_total + sd_free */
+typedef struct {
+  uint32_t has;
+  char model[40];
+  char firmware[32];
+  uint64_t ram_total;
+  uint64_t app_mem_total, app_mem_free;
+  uint64_t sys_mem_total, sys_mem_free;
+  uint64_t sd_total, sd_free;
+} ndp_device_info;
+
 typedef struct {
   const char *platform;      /* "3ds", "host", ... */
   const char *agent_version; /* "0.1.0" */
@@ -28,6 +46,10 @@ typedef struct {
   /* Optional. NULL fs => FS commands answer UNSUPPORTED_COMMAND. NULL policy => spec defaults. */
   const ndp_fs_ops *fs;
   const ndp_policy *policy;
+  /* Optional. Fills what the platform can measure (may take a while: on the 3DS reading the SD free space walks the
+   * FAT). NULL => DEVICE_INFO answers UNSUPPORTED_COMMAND. Returns 0, or non-zero => IO_ERROR. */
+  int (*device_info)(void *ctx, ndp_device_info *out);
+  void *device_info_ctx;
 } ndp_agent_config;
 
 typedef struct {

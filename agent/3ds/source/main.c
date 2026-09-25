@@ -184,6 +184,53 @@ static int random_bytes(void *ctx, uint8_t *out, size_t n) {
 }
 
 static void draw(uint64_t now);
+static bool g_cfgu_ok = false;
+
+/* DEVICE_INFO: what this console can report about itself. Fields it cannot read are simply left out. The SD free-space
+ * query may take a moment on a big card (the OS reads the FAT), so it is only done when a client asks. */
+static int device_info(void *ctx, ndp_device_info *di) {
+  static const char *const models[] = {"Nintendo 3DS", "Nintendo 3DS XL", "New Nintendo 3DS", "Nintendo 2DS",
+                                       "New Nintendo 3DS XL", "New Nintendo 2DS XL"};
+  u8 model = 0xFF;
+  bool is_new = false, known = false;
+  FS_ArchiveResource res;
+  (void)ctx;
+  if (g_cfgu_ok && R_SUCCEEDED(CFGU_GetSystemModel(&model)) && model < sizeof models / sizeof models[0]) {
+    snprintf(di->model, sizeof di->model, "%s", models[model]);
+    di->has |= NDP_DI_MODEL;
+    is_new = model == CFG_MODEL_N3DS || model == CFG_MODEL_N3DSXL || model == CFG_MODEL_N2DSXL;
+    known = true;
+  } else if (R_SUCCEEDED(APT_CheckNew3DS(&is_new))) {
+    snprintf(di->model, sizeof di->model, "%s", is_new ? "New 3DS family" : "Old 3DS family");
+    di->has |= NDP_DI_MODEL;
+    known = true;
+  }
+  if (known) {
+    di->ram_total = (uint64_t)(is_new ? 256u : 128u) << 20;
+    di->has |= NDP_DI_RAM_TOTAL;
+  }
+  if (R_SUCCEEDED(osGetSystemVersionDataString(NULL, NULL, di->firmware, sizeof di->firmware))) {
+    di->has |= NDP_DI_FIRMWARE;
+  } else {
+    u32 k = osGetKernelVersion();
+    snprintf(di->firmware, sizeof di->firmware, "kernel %lu.%lu-%lu", (unsigned long)GET_VERSION_MAJOR(k),
+             (unsigned long)GET_VERSION_MINOR(k), (unsigned long)GET_VERSION_REVISION(k));
+    di->has |= NDP_DI_FIRMWARE;
+  }
+  di->app_mem_total = osGetMemRegionSize(MEMREGION_APPLICATION);
+  di->app_mem_free = osGetMemRegionFree(MEMREGION_APPLICATION);
+  di->has |= NDP_DI_APP_MEM;
+  di->sys_mem_total = osGetMemRegionSize(MEMREGION_SYSTEM);
+  di->sys_mem_free = osGetMemRegionFree(MEMREGION_SYSTEM);
+  di->has |= NDP_DI_SYS_MEM;
+  if (R_SUCCEEDED(FSUSER_GetSdmcArchiveResource(&res))) {
+    di->sd_total = (uint64_t)res.clusterSize * res.totalClusters;
+    di->sd_free = (uint64_t)res.clusterSize * res.freeClusters;
+    di->has |= NDP_DI_SD;
+  }
+  return 0;
+}
+
 static ndp_keystore g_keys;
 static ndp_access g_access; /* the folders the owner opened (edited on the console, never over the network) */
 static bool g_keys_dirty_warn = false;     /* the last save failed */
@@ -456,6 +503,8 @@ int main(void) {
   r = psInit();
   g_ps_ok = R_SUCCEEDED(r);
   alog("psInit: 0x%08lX", (unsigned long)r);
+  g_cfgu_ok = R_SUCCEEDED(cfguInit());
+  alog("cfguInit: %s", g_cfgu_ok ? "ok" : "failed (model falls back to APT)");
   r = ndmuInit();
   alog("ndmuInit: 0x%08lX", (unsigned long)r);
 
@@ -466,6 +515,7 @@ int main(void) {
   cfg.auth = AGENT_AUTH_REQUIRED ? "required" : "none";
   cfg.max_frame = NDP_DEFAULT_MAX_FRAME;
   cfg.random_bytes = random_bytes;
+  cfg.device_info = device_info;
   if (ndp_posix_fs_init(&g_fs_base, &g_fs_ctx, "sdmc:") == 0) {
     g_fs = g_fs_base;
     g_fs.stat = fs_stat;
@@ -592,6 +642,7 @@ int main(void) {
   if (g_soc_up) socExit();
   free(g_soc_buf);
   if (g_ps_ok) psExit();
+  if (g_cfgu_ok) cfguExit();
   ndmuExit();
   acExit();
   alog_exit();

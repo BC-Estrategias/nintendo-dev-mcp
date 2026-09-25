@@ -154,7 +154,12 @@ suite("ndev-mcp over stdio", () => {
     const info = await mcp.call("nintendo_device_info");
     assert.equal(info.structuredContent!.platform, "host");
     assert.equal(info.structuredContent!.mode, "DEVELOPMENT");
-    assert.deepEqual(info.structuredContent!.unavailable, ["model", "memory", "sd_total", "sd_free"]);
+    const sc = info.structuredContent!;
+    assert.match(sc.model, /^host \(/, "the host agent reports what the machine says");
+    assert.ok(sc.sd_card.total > 0 && sc.sd_card.free >= 0 && sc.sd_card.free <= sc.sd_card.total, "SD capacity");
+    assert.deepEqual(sc.unavailable, ["ram"], "what the platform cannot measure is listed, not invented");
+    assert.equal(sc.app_memory, null);
+    assert.match(text(info), /Console: host \(.*SD card: .* free of/);
     const f = await mcp.call("nintendo_find_device", { hosts: ["127.0.0.1"] });
     assert.equal(f.structuredContent!.devices[0].host, "127.0.0.1");
     assert.equal(f.structuredContent!.devices[0].mode, "DEVELOPMENT");

@@ -2,7 +2,7 @@ import { createWriteStream, existsSync, renameSync, rmSync } from "node:fs";
 import { once } from "node:events";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import { NdpRemoteError, NdpTransportError, PathInvalidError, Status, discover, expandHosts, type AccessInfo, type FsEntry } from "@ndev/core";
+import { NdpRemoteError, NdpTransportError, PathInvalidError, Status, discover, expandHosts, type AccessInfo, type DeviceInfo, type FsEntry } from "@ndev/core";
 import { Audit } from "./audit.ts";
 import { DeviceConnection, DeviceNotFoundError } from "./connection.ts";
 
@@ -132,29 +132,46 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 
   tool("nintendo_device_info", {
     title: "Device and agent information",
-    description: `Returns what the console agent reports about itself: platform, agent and protocol version, access mode (READ_ONLY forbids all writes; DEVELOPMENT allows writes only inside the writable folders), the folders the console's owner has opened for reading and for writing (readable_folders / writable_folders — everything else is off limits), max frame size and its network address. ${HARDWARE} Model, memory and SD free space are NOT available yet (the agent has no DEVICE_INFO command); they are reported as unavailable, never guessed.`,
+    description: `Returns what the console agent reports about itself: platform, agent and protocol version, access mode (READ_ONLY forbids all writes; DEVELOPMENT allows writes only inside the writable folders), the folders the console's owner has opened for reading and for writing (readable_folders / writable_folders — everything else is off limits), max frame size and its network address. ${HARDWARE} Also returns the console model, firmware, RAM, memory regions and SD card total/free bytes (agent >= 1.1.0). Anything the console could not measure is reported as null/unavailable, never guessed.`,
     inputSchema: z.object({}),
     readOnly: true,
   }, async () => {
     const info = await ctx.conn.run(async (c) => {
       const rtt = await c.ping();
       let access: AccessInfo | null = null;
+      let device: DeviceInfo | null = null;
       try {
         access = await c.accessInfo();
       } catch (e) {
         if (!(e instanceof NdpRemoteError && e.statusName === "UNSUPPORTED_COMMAND")) throw e; // agent older than 0.6.0
       }
-      return { hello: c.info!, rtt, access };
+      try {
+        device = await c.deviceInfo();
+      } catch (e) {
+        if (!(e instanceof NdpRemoteError && e.statusName === "UNSUPPORTED_COMMAND")) throw e; // agent older than 1.1.0
+      }
+      return { hello: c.info!, rtt, access, device };
     }, { idempotent: true });
     const h = info.hello;
+    const gib = (n: number) => `${(n / 1024 ** 3).toFixed(1)} GiB`;
+    const d = info.device;
     const data = {
       host: ctx.conn.host, port: ctx.conn.port, platform: h.platform, agent_version: h.agentVersion, protocol_version: h.protocol,
       mode: h.mode, auth: h.auth, max_frame_bytes: h.maxFrame, rtt_ms: Math.round(info.rtt * 10) / 10,
       readable_folders: info.access?.readRoots ?? null,
       writable_folders: info.access?.writeRoots ?? null,
-      unavailable: ["model", "memory", "sd_total", "sd_free"],
+      model: info.device?.model ?? null,
+      firmware: info.device?.firmware ?? null,
+      ram_bytes: info.device?.ramTotal ?? null,
+      app_memory: info.device?.appMemory ?? null,
+      system_memory: info.device?.systemMemory ?? null,
+      sd_card: info.device?.sd ?? null,
+      unavailable: info.device
+        ? [["model", info.device.model], ["firmware", info.device.firmware], ["ram", info.device.ramTotal], ["sd_card", info.device.sd]]
+            .filter(([, v]) => v === undefined).map(([k]) => String(k))
+        : ["model", "firmware", "memory", "sd_card"], // agent older than 1.1.0
     };
-    return ok(`${h.platform} agent v${h.agentVersion} at ${ctx.conn.host}:${ctx.conn.port}, mode ${h.mode}, auth ${h.auth}, ping ${data.rtt_ms} ms. Writes are only possible in DEVELOPMENT mode and only inside the writable folders.${info.access ? ` Readable folders: ${info.access.readRoots.join(", ")}. Writable folders: ${info.access.writeRoots.join(", ")}.` : ""} Only the console's owner can change these lists, on the console itself.`, data);
+    return ok(`${h.platform} agent v${h.agentVersion} at ${ctx.conn.host}:${ctx.conn.port}, mode ${h.mode}, auth ${h.auth}, ping ${data.rtt_ms} ms.${d?.model ? ` Console: ${d.model}${d.firmware ? `, firmware ${d.firmware}` : ""}.` : ""}${d?.sd ? ` SD card: ${gib(d.sd.free)} free of ${gib(d.sd.total)}.` : ""} Writes are only possible in DEVELOPMENT mode and only inside the writable folders.${info.access ? ` Readable folders: ${info.access.readRoots.join(", ")}. Writable folders: ${info.access.writeRoots.join(", ")}.` : ""} Only the console's owner can change these lists, on the console itself.`, data);
   });
 
   tool("nintendo_fs_list", {

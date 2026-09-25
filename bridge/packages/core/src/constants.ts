@@ -17,6 +17,7 @@ export const Command = {
   PING: 0x0002,
   PAIR: 0x0004,
   AUTH: 0x0005,
+  DEVICE_INFO: 0x0010,
   ACCESS_INFO: 0x0011,
   FS_LIST: 0x0020,
   FS_STAT: 0x0021,
@@ -102,6 +103,15 @@ export const Tag = {
   LABEL: 0x004c,
   READ_ROOT: 0x004d,
   WRITE_ROOT: 0x004e,
+  MODEL: 0x004f,
+  FIRMWARE: 0x0050,
+  RAM_TOTAL: 0x0051,
+  APP_MEM_TOTAL: 0x0052,
+  APP_MEM_FREE: 0x0053,
+  SYS_MEM_TOTAL: 0x0054,
+  SYS_MEM_FREE: 0x0055,
+  SD_TOTAL: 0x0056,
+  SD_FREE: 0x0057,
 } as const;
 
 export type Mode = "READ_ONLY" | "DEVELOPMENT" | "FULL";

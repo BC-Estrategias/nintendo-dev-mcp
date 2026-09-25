@@ -531,6 +531,63 @@ static void test_traversal(void) {
   strcpy(g_root, saved);
 }
 
+/* DEVICE_INFO: only what the platform reports is sent; without a callback the command is unsupported. */
+static int fake_device_info(void *ctx, ndp_device_info *di) {
+  int *fail = (int *)ctx;
+  if (*fail == 1) return -1;
+  if (*fail == 2) return 0; /* the platform could measure nothing */
+  di->has = NDP_DI_MODEL | NDP_DI_RAM_TOTAL | NDP_DI_APP_MEM | NDP_DI_SD; /* no firmware, no system memory */
+  strcpy(di->model, "New Nintendo 3DS XL");
+  di->ram_total = 256u << 20;
+  di->app_mem_total = 124u << 20; di->app_mem_free = 100u << 20;
+  di->sd_total = 62000000000ull; di->sd_free = 31000000000ull;
+  return 0;
+}
+
+static void test_device_info(void) {
+  ndp_agent a;
+  ndp_agent_config cfg;
+  int fail = 0;
+  treq t;
+  resp_t r;
+  const uint8_t *v;
+  size_t l;
+  memset(&cfg, 0, sizeof cfg);
+  cfg.platform = "host"; cfg.agent_version = "t"; cfg.auth = "none"; cfg.mode = NDP_MODE_READ_ONLY;
+  cfg.max_frame = 65536; cfg.fs = &g_ops;
+  ndp_agent_init(&a, &cfg);
+  treq_init(&t);
+  ndp_tlv_put_u16(&t.w, NDP_TAG_PROTOCOL, 1); ndp_tlv_put_u16(&t.w, NDP_TAG_PROTOCOL_MAX, 1);
+  { uint8_t n[16] = {0}; ndp_tlv_put(&t.w, NDP_TAG_NONCE, n, 16); }
+  CHECK(is_res(go(&a, NDP_CMD_HELLO, &t)), "hello");
+  treq_init(&t);
+  CHECK(is_err(go(&a, NDP_CMD_DEVICE_INFO, &t), NDP_ST_UNSUPPORTED_COMMAND), "no platform callback: unsupported");
+
+  cfg.device_info = fake_device_info; cfg.device_info_ctx = &fail;
+  ndp_agent_init(&a, &cfg);
+  treq_init(&t);
+  ndp_tlv_put_u16(&t.w, NDP_TAG_PROTOCOL, 1); ndp_tlv_put_u16(&t.w, NDP_TAG_PROTOCOL_MAX, 1);
+  { uint8_t n[16] = {0}; ndp_tlv_put(&t.w, NDP_TAG_NONCE, n, 16); }
+  CHECK(is_res(go(&a, NDP_CMD_HELLO, &t)), "hello 2");
+  treq_init(&t);
+  r = go(&a, NDP_CMD_DEVICE_INFO, &t);
+  CHECK(is_res(r), "DEVICE_INFO answers in READ_ONLY mode");
+  CHECK(ndp_tlv_find(r.pl, r.len, NDP_TAG_MODEL, &v, &l) && l == 19 && memcmp(v, "New Nintendo 3DS XL", 19) == 0, "model");
+  CHECK(tlv_u64(r, NDP_TAG_RAM_TOTAL) == (256ull << 20), "ram total");
+  CHECK(tlv_u64(r, NDP_TAG_APP_MEM_TOTAL) == (124ull << 20) && tlv_u64(r, NDP_TAG_APP_MEM_FREE) == (100ull << 20), "app memory");
+  CHECK(tlv_u64(r, NDP_TAG_SD_TOTAL) == 62000000000ull && tlv_u64(r, NDP_TAG_SD_FREE) == 31000000000ull, "sd");
+  CHECK(!ndp_tlv_find(r.pl, r.len, NDP_TAG_FIRMWARE, &v, &l), "a field the platform did not report is absent, not invented");
+  CHECK(!ndp_tlv_find(r.pl, r.len, NDP_TAG_SYS_MEM_TOTAL, &v, &l) && !ndp_tlv_find(r.pl, r.len, NDP_TAG_SYS_MEM_FREE, &v, &l), "system memory absent");
+  fail = 1;
+  treq_init(&t);
+  CHECK(is_err(go(&a, NDP_CMD_DEVICE_INFO, &t), NDP_ST_IO_ERROR), "a platform failure is IO_ERROR");
+  fail = 2;
+  treq_init(&t);
+  r = go(&a, NDP_CMD_DEVICE_INFO, &t);
+  CHECK(is_res(r) && r.len == 0, "nothing measured: an empty answer, no invented fields (len %zu)", r.len);
+  ndp_agent_close(&a);
+}
+
 int main(void) {
   char tmpl[] = "/tmp/ndp-fs-test-XXXXXX";
   char cmd[128];
@@ -546,6 +603,7 @@ int main(void) {
   test_busy_abort_shrink();
   test_gating();
   test_traversal();
+  test_device_info();
 
   ndp_agent_close(&g_agent);
   snprintf(cmd, sizeof cmd, "rm -rf %s", g_root);

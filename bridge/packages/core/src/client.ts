@@ -72,6 +72,22 @@ export interface WriteResult {
   ms: number;
 }
 
+/** What the console reports about itself (agent >= 1.1.0). A field is absent when the console could not measure it. */
+export interface DeviceInfo {
+  /** "New Nintendo 3DS XL", "Nintendo 2DS", ... */
+  model?: string;
+  /** System version as shown in Settings ("11.17.0-50U"), or the kernel version when that is not readable. */
+  firmware?: string;
+  /** Physical RAM of the model: 128 MiB (old) or 256 MiB (new). */
+  ramTotal?: number;
+  /** Memory region of the foreground app (where the agent itself runs), bytes. */
+  appMemory?: { total: number; free: number };
+  /** SYSTEM memory region, bytes. */
+  systemMemory?: { total: number; free: number };
+  /** The SD card, bytes. */
+  sd?: { total: number; free: number };
+}
+
 /** What the console's owner has opened to this computer (they choose it ON the console). */
 export interface AccessInfo {
   mode: Mode;
@@ -416,6 +432,30 @@ export class NdpClient {
     };
     this.#decoder = new FrameDecoder(maxFrame);
     return this.#info;
+  }
+
+  /** Model, firmware, memory and SD capacity (agent >= 1.1.0; UNSUPPORTED_COMMAND on older agents). Reading the SD free
+   * space can take a few seconds on a large card. */
+  async deviceInfo(): Promise<DeviceInfo> {
+    const t = parseTlv((await this.request(Command.DEVICE_INFO, new Uint8Array(0), SLOW_FS_TIMEOUT_MS)).payload);
+    const num = (tag: number): number | undefined => {
+      const v = t.u64(tag);
+      return v === undefined ? undefined : Number(v);
+    };
+    const pair = (totalTag: number, freeTag: number) => {
+      const total = num(totalTag), free = num(freeTag);
+      return total !== undefined && free !== undefined ? { total, free } : undefined;
+    };
+    const out: DeviceInfo = {};
+    const model = t.str(Tag.MODEL), firmware = t.str(Tag.FIRMWARE), ram = num(Tag.RAM_TOTAL);
+    if (model !== undefined) out.model = model;
+    if (firmware !== undefined) out.firmware = firmware;
+    if (ram !== undefined) out.ramTotal = ram;
+    const app = pair(Tag.APP_MEM_TOTAL, Tag.APP_MEM_FREE), sys = pair(Tag.SYS_MEM_TOTAL, Tag.SYS_MEM_FREE), sd = pair(Tag.SD_TOTAL, Tag.SD_FREE);
+    if (app) out.appMemory = app;
+    if (sys) out.systemMemory = sys;
+    if (sd) out.sd = sd;
+    return out;
   }
 
   /** The folders the console's owner allows this computer to read and write (agent >= 0.6.0). */

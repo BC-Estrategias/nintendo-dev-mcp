@@ -12,6 +12,8 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <arpa/inet.h>
+#include <sys/statvfs.h>
+#include <sys/utsname.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -56,6 +58,26 @@ static int random_bytes(void *ctx, uint8_t *out, size_t n) {
   return got < n ? -1 : 0;
 }
 
+/* DEVICE_INFO on the host: what the machine and the folder standing in for the SD card really report. */
+static const char *g_sd_root = NULL;
+static int device_info(void *ctx, ndp_device_info *di) {
+  struct utsname u;
+  struct statvfs v;
+  (void)ctx;
+  if (uname(&u) == 0) {
+    snprintf(di->model, sizeof di->model, "host (%.14s %.14s)", u.sysname, u.machine);
+    di->has |= NDP_DI_MODEL;
+    snprintf(di->firmware, sizeof di->firmware, "%.31s", u.release);
+    di->has |= NDP_DI_FIRMWARE;
+  }
+  if (g_sd_root && statvfs(g_sd_root, &v) == 0) {
+    di->sd_total = (uint64_t)v.f_blocks * v.f_frsize;
+    di->sd_free = (uint64_t)v.f_bavail * v.f_frsize;
+    di->has |= NDP_DI_SD;
+  }
+  return 0;
+}
+
 static const char *g_keys_file = NULL;
 static void keys_changed(void *ctx, const ndp_keystore *keys) {
   int rc;
@@ -92,6 +114,7 @@ int main(int argc, char **argv) {
   cfg.auth = "none";
   cfg.max_frame = NDP_DEFAULT_MAX_FRAME;
   cfg.random_bytes = random_bytes;
+  cfg.device_info = device_info;
 
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--bind") && i + 1 < argc) bind_addr = argv[++i];
@@ -147,6 +170,7 @@ int main(int argc, char **argv) {
     if (strcmp(clean, "/") == 0) clean[0] = '\0';
     if (ndp_posix_fs_init(&fs_ops, &fs_ctx, clean) != 0) { fprintf(stderr, "--root too long\n"); return 2; }
     cfg.fs = &fs_ops;
+    g_sd_root = root;
   }
   if (access_file) { /* the owner's list, as the console UI would have saved it */
     int ar = ndp_access_load_file(&access, access_file);

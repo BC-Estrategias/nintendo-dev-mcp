@@ -77,7 +77,7 @@ mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16
 | 0x0002 | PING | ✔ | eco de nonce |
 | 0x0004 | PAIR | M5 ✔ | pareamento (janela aberta no console) |
 | 0x0005 | AUTH | M5 ✔ | prova de posse da chave pareada |
-| 0x0010 | DEVICE_INFO | M2 | |
+| 0x0010 | DEVICE_INFO | M2 ✔ | modelo, firmware, RAM, regiões de memória e capacidade do SD |
 | 0x0011 | ACCESS_INFO | M5 ✔ | modo e pastas que o dono liberou (só depois do AUTH) |
 | 0x0020 | FS_LIST | M3 ✔ | lista um diretório (paginado) |
 | 0x0021 | FS_STAT | M3 ✔ | tipo, tamanho, mtime |
@@ -161,6 +161,12 @@ ERR carrega, opcionalmente: `0x0001 detail` (str, texto humano curto, **informat
 | 0x004C | label | str | PAIR REQ (≤ 15 bytes) |
 | 0x004D | read_root | str | ACCESS_INFO RES, repetido: pasta legível (recursivamente) |
 | 0x004E | write_root | str | ACCESS_INFO RES, repetido: pasta gravável (subconjunto de read_root) |
+| 0x004F | model | str | DEVICE_INFO RES |
+| 0x0050 | firmware | str | DEVICE_INFO RES: versão do sistema ("11.17.0-50U") ou a do kernel |
+| 0x0051 | ram_total | u64 | DEVICE_INFO RES: RAM física do modelo (128 ou 256 MiB), bytes |
+| 0x0052 / 0x0053 | app_mem_total / app_mem_free | u64 | DEVICE_INFO RES: região de memória do app em primeiro plano (onde o próprio agente roda) |
+| 0x0054 / 0x0055 | sys_mem_total / sys_mem_free | u64 | DEVICE_INFO RES: região SYSTEM |
+| 0x0056 / 0x0057 | sd_total / sd_free | u64 | DEVICE_INFO RES: cartão SD, bytes |
 
 ## 8. Ordem de validação de um frame recebido pelo agent
 Depois que o decoder entrega um frame, o agent avalia **nesta ordem** e responde ao primeiro problema:
@@ -225,6 +231,9 @@ Quem escolhe o que é liberado é a pessoa **no console** (botão A → "Access 
 
 ### 11.3 ACCESS_INFO (0x0011)
 `REQ {}` → `RES {mode str, read_root str…, write_root str…}` (só depois do AUTH). Serve para o cliente (e o assistente) saber o que pode tocar, em vez de descobrir por erros `PROTECTED_PATH`.
+
+### 11.4 DEVICE_INFO (0x0010)
+`REQ {}` → `RES {model str?, firmware str?, ram_total u64?, app_mem_total/app_mem_free u64?, sys_mem_total/sys_mem_free u64?, sd_total/sd_free u64?}`. Depois do AUTH, em qualquer modo (só leitura). **Um campo só aparece se o console conseguiu medi-lo**: o agente nunca inventa valor (uma resposta vazia é válida). Sem suporte da plataforma → `UNSUPPORTED_COMMAND`; falha ao ler → `IO_ERROR`. No 3DS, ler o espaço livre do SD pode levar alguns segundos num cartão grande (o SO lê a FAT): o cliente usa o timeout longo. Os valores de memória descrevem o momento da consulta e o app que está em primeiro plano (o agente), não um jogo em execução.
 
 ## 12. Fluxo de recepção (normativo para o decoder)
 Um decoder DEVE: acumular até 20 bytes; validar `magic`; ler `payload_len`; rejeitar `> max_frame` imediatamente; acumular `payload_len` (+16 se MAC); só então entregar o frame. Em erro de magic/flags a conexão é considerada desincronizada e DEVE ser fechada (não há ressincronização).

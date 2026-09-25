@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.1.0
+- `DEVICE_INFO` (0x0010): console model, firmware, RAM, memory regions and SD card total/free space. `ndev info`, and `nintendo_device_info` now returns them (fields the console cannot measure are absent, never guessed).
+
 ## 1.0.0 — 2026-09-25
 First release for other people.
 - The agent **starts READ_ONLY** (press X on the console to allow writes). `NDEV_DEV=1` builds a developer flavour.
