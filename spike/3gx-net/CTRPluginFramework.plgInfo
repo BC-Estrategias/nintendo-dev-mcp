@@ -3,8 +3,9 @@ Author: Nintendo Dev MCP
 Version: # Plugin version
     Major: 0
     Minor: 0
-    Revision: 4
+    Revision: 5
 
+MemorySize: 2MiB # Luma takes the plugin memory from the GAME's memory on a New 3DS; the game (SystemModeExt 124MB) uses nearly all of it
 AllowHomebrewLoad: true # the game is a libctru homebrew CIA: Luma skips such games silently otherwise
 
 Targets: # Low TitleId of games which are compatibles with this plugin (0 for all)

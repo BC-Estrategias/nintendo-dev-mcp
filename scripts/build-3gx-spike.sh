@@ -22,6 +22,6 @@ make -C "$B" CTRPFLIB="$PWD/third_party/libctrpf" 2>&1 | grep -E "error|Error|un
 OUT="$(ls "$B"/*.3gx 2>/dev/null | head -1)"
 [ -n "$OUT" ] || { echo "build failed"; exit 1; }
 mkdir -p dist
-cp "$OUT" dist/ndev-spike-v0.0.4.3gx
-shasum -a 256 dist/ndev-spike-v0.0.4.3gx
-echo "built: dist/ndev-spike-v0.0.4.3gx"
+cp "$OUT" dist/ndev-spike-v0.0.5.3gx
+shasum -a 256 dist/ndev-spike-v0.0.5.3gx
+echo "built: dist/ndev-spike-v0.0.5.3gx"
