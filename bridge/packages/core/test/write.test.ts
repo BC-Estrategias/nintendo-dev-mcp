@@ -266,6 +266,41 @@ suite("writes over TCP (DEVELOPMENT mode)", () => {
     }
   });
 
+  test("rename/move: never overwrites, restores from the trash, refuses roots and moves into the trash", async () => {
+    const c = await connect();
+    try {
+      await c.hello();
+      writeFileSync(join(agentDir, "mv1.txt"), "M1");
+      assert.equal(await c.rename(`${DIR}/mv1.txt`, `${DIR}/mv1-new.txt`), `${DIR}/mv1-new.txt`);
+      assert.equal(readFileSync(join(agentDir, "mv1-new.txt"), "utf8"), "M1");
+      assert.equal(existsSync(join(agentDir, "mv1.txt")), false);
+      writeFileSync(join(agentDir, "mv2.txt"), "M2");
+      assert.equal(await code(c.rename(`${DIR}/mv2.txt`, `${DIR}/mv1-new.txt`)), "EXISTS");
+      assert.equal(readFileSync(join(agentDir, "mv1-new.txt"), "utf8"), "M1", "the destination was not touched");
+      assert.equal(await code(c.rename(`${DIR}/mv2.txt`, `${DIR}/nope/x.txt`)), "NOT_FOUND");
+      assert.equal(await code(c.rename(DIR, `${DIR}-moved`)), "PROTECTED_PATH");
+      assert.equal(await code(c.rename(`${DIR}/mv2.txt`, "/luma/mv2.txt")), "PROTECTED_PATH");
+      assert.equal(await code(c.rename(`${DIR}/mv2.txt`, `${DIR}/.ndp-trash/mv2.txt`)), "PROTECTED_PATH");
+      // delete, then restore by renaming out of the trash
+      const d = await c.delete(`${DIR}/mv2.txt`);
+      assert.equal(await c.rename(d.trashPath, `${DIR}/mv2-restored.txt`), `${DIR}/mv2-restored.txt`);
+      assert.equal(readFileSync(join(agentDir, "mv2-restored.txt"), "utf8"), "M2");
+      assert.equal(await code(c.rename(`${DIR}/mv1-new.txt`, "relative/x")), "local:PathInvalidError");
+    } finally {
+      c.close();
+    }
+  });
+
+  test("CLI: mv", async () => {
+    const target = `127.0.0.1:${port}`;
+    const cli = (...args: string[]) => run(process.execPath, [CLI, ...args], { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 });
+    writeFileSync(join(agentDir, "climv.txt"), "X");
+    const out = await cli("mv", target, `${DIR}/climv.txt`, `${DIR}/climv2.txt`);
+    assert.match(out.stdout.toString(), /climv\.txt -> .*climv2\.txt/);
+    assert.equal(readFileSync(join(agentDir, "climv2.txt"), "utf8"), "X");
+    await assert.rejects(cli("mv", target, `${DIR}/climv2.txt`, "/luma/x"), (e: { stderr: Buffer }) => /PROTECTED_PATH/.test(e.stderr.toString()));
+  });
+
   test("CLI: rm moves several items, reports per-item failures, exit code reflects them", async () => {
     const target = `127.0.0.1:${port}`;
     const cli = (...args: string[]) => run(process.execPath, [CLI, ...args], { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 });

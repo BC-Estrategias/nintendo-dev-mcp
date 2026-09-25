@@ -278,6 +278,17 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     return ok(`Created directory ${p}`, { path: p });
   });
 
+  tool("nintendo_fs_move", {
+    title: "Move or rename a file or folder",
+    description: `Moves or renames a file or a whole folder on the console's SD card (modifies real storage). Same access rules as nintendo_fs_write: both the source and the destination must be inside writable folders and outside the protected zones. It NEVER overwrites: an existing destination fails with EXISTS. The destination folder must already exist. A writable-folder root cannot be moved, and nothing can be moved INTO the trash with this tool (use nintendo_fs_delete); moving an item OUT of <writable folder>/.ndp-trash/ restores it. ${HARDWARE}`,
+    inputSchema: z.object({ from: path, to: path }),
+    readOnly: false,
+    audit: (a) => ({ from: a.from, to: a.to }),
+  }, async ({ from, to }) => {
+    const dest = await ctx.conn.run((c) => c.rename(from, to), { idempotent: false });
+    return ok(`Moved ${from} to ${dest}`, { from, to: dest });
+  });
+
   tool("nintendo_fs_delete", {
     title: "Move a file or folder to the trash",
     description: `"Deletes" by MOVING a file or a whole folder into <writable folder>/.ndp-trash/ on the console — nothing is destroyed, and the content stays readable there (and can be restored by renaming it on the SD card). Same access rules as nintendo_fs_write; writable-folder roots and items already in the trash are refused. The first deletion under a folder creates the trash and takes ~6 seconds. ${HARDWARE}`,

@@ -129,9 +129,9 @@ suite("ndev-mcp over stdio", () => {
     const names = list.map((t) => t.name).sort();
     assert.deepEqual(names, [
       "nintendo_agent_log", "nintendo_device_info", "nintendo_find_device", "nintendo_fs_delete", "nintendo_fs_download",
-      "nintendo_fs_list", "nintendo_fs_mkdir", "nintendo_fs_read", "nintendo_fs_stat", "nintendo_fs_upload", "nintendo_fs_write", "nintendo_ping",
+      "nintendo_fs_list", "nintendo_fs_mkdir", "nintendo_fs_move", "nintendo_fs_read", "nintendo_fs_stat", "nintendo_fs_upload", "nintendo_fs_write", "nintendo_ping",
     ]);
-    const writers = new Set(["nintendo_fs_write", "nintendo_fs_mkdir", "nintendo_fs_delete", "nintendo_fs_upload"]);
+    const writers = new Set(["nintendo_fs_write", "nintendo_fs_mkdir", "nintendo_fs_delete", "nintendo_fs_upload", "nintendo_fs_move"]);
     for (const t of list) {
       assert.ok(t.description.length > 120, `${t.name} has a substantive description`);
       assert.match(t.description, /REAL Nintendo 3DS/, `${t.name} says it is real hardware`);
@@ -229,6 +229,15 @@ suite("ndev-mcp over stdio", () => {
     assert.equal(existsSync(join(agentDir, "b.bin")), false);
     assert.deepEqual(readFileSync(join(agentDir, ".ndp-trash/b.bin")), Buffer.from([1, 2, 3, 250]));
     assert.equal((await mcp.call("nintendo_fs_delete", { path: DIR })).isError, true, "a writable root cannot be deleted");
+    // move: rename, never overwrite, restore from the trash
+    const mv = await mcp.call("nintendo_fs_move", { from: `${DIR}/.ndp-trash/b.bin`, to: `${DIR}/b-restored.bin` });
+    assert.equal(mv.structuredContent!.to, `${DIR}/b-restored.bin`);
+    assert.deepEqual(readFileSync(join(agentDir, "b-restored.bin")), Buffer.from([1, 2, 3, 250]));
+    assert.equal(existsSync(join(agentDir, ".ndp-trash/b.bin")), false);
+    const clash = await mcp.call("nintendo_fs_move", { from: `${DIR}/b-restored.bin`, to: `${DIR}/test.txt` });
+    assert.equal(clash.isError, true);
+    assert.match(text(clash), /EXISTS/);
+    assert.equal(readFileSync(join(agentDir, "test.txt"), "utf8"), HELLO, "the existing file is untouched");
     assert.equal(readdirSync(agentDir).some((n) => /ndp-(tmp|old)/.test(n)), false);
     const big = await mcp.call("nintendo_fs_write", { path: `${DIR}/huge.txt`, content: "x".repeat(1024 * 1024 + 1) });
     assert.equal(big.isError, true);

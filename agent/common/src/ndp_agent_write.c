@@ -313,3 +313,79 @@ size_t ndp_agent_delete(ndp_agent *a, const ndp_header *req, const uint8_t *pl, 
   ndp_tlv_put_str(&w, NDP_TAG_TRASH_PATH, dest);
   return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
 }
+
+/* FS_RENAME (spec §14): moves or renames a file or folder, atomically, without ever overwriting. Both the source and the
+ * destination must pass the WRITE policy. Items enter the trash only through FS_DELETE; leaving it (restoring) is a rename. */
+static int is_configured_root(const ndp_agent *a, const char *norm) {
+  int i;
+  if (strcmp(norm, "/") == 0) return 1;
+  for (i = 0; i < a->policy.write_roots.count; i++)
+    if (strcmp(norm, a->policy.write_roots.entries[i]) == 0) return 1;
+  for (i = 0; i < a->policy.read_roots.count; i++)
+    if (strcmp(norm, a->policy.read_roots.entries[i]) == 0) return 1;
+  return 0;
+}
+
+static int is_a_trash_dir(const ndp_agent *a, const char *norm) {
+  char t[NDP_PATH_MAX + 16];
+  int i;
+  for (i = 0; i < a->policy.write_roots.count; i++)
+    if (trash_dir_of(a->policy.write_roots.entries[i], t, sizeof t) == 0 && strcmp(norm, t) == 0) return 1;
+  return 0;
+}
+
+size_t ndp_agent_rename(ndp_agent *a, const ndp_header *req, const uint8_t *pl, uint8_t *out, size_t cap) {
+  const ndp_fs_ops *fs = a->cfg.fs;
+  char from[NDP_PATH_MAX + 1], to[NDP_PATH_MAX + 1], parent[NDP_PATH_MAX + 1], tmp[NDP_PATH_MAX + 16];
+  const char *detail = "";
+  const uint8_t *v;
+  size_t l;
+  ndp_fs_stat st;
+  ndp_tlv_w w;
+  int rc, case_only = 0;
+
+  rc = resolve_write_path(a, req, pl, from, &detail);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, detail, 0);
+  if (!ndp_tlv_find(pl, req->payload_len, NDP_TAG_NEW_PATH, &v, &l))
+    return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "new_path required", 0);
+  rc = ndp_policy_check(&a->policy, a->cfg.mode, 1, v, l, to);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, wdetail(rc), 0);
+
+  if (is_configured_root(a, from) || is_a_trash_dir(a, from))
+    return ndp_agent_error(out, cap, req, NDP_ST_PROTECTED_PATH, "this folder is a configured root or the trash and cannot be moved", 0);
+  if (is_configured_root(a, to)) return ndp_agent_error(out, cap, req, NDP_ST_EXISTS, wdetail(NDP_ST_EXISTS), 0);
+  if (in_any_trash(a, to))
+    return ndp_agent_error(out, cap, req, NDP_ST_PROTECTED_PATH, "items enter the trash only by deleting them", 0);
+  if (strlen(to) + sizeof ".ndp-ren" > NDP_PATH_MAX) return ndp_agent_error(out, cap, req, NDP_ST_PATH_INVALID, "path too long", 0);
+
+  /* "a" -> "A": the same name on a case-insensitive card (FAT) */
+  if (ndp_path_inside(from, to) && ndp_path_inside(to, from)) {
+    if (strcmp(from, to) == 0) return ndp_agent_error(out, cap, req, NDP_ST_EXISTS, "source and destination are the same", 0);
+    case_only = 1;
+  } else if (ndp_path_inside(to, from)) {
+    return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "cannot move a folder into itself", 0);
+  }
+
+  rc = fs->stat(fs->ctx, from, &st);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, rc == NDP_ST_NOT_FOUND ? "no such file or directory" : wdetail(rc), 0);
+  parent_of(to, parent);
+  rc = fs->stat(fs->ctx, parent, &st);
+  if (rc != NDP_OK || !st.is_dir) return ndp_agent_error(out, cap, req, NDP_ST_NOT_FOUND, "destination folder does not exist", 0);
+  if (!case_only && fs->stat(fs->ctx, to, &st) == NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_EXISTS, wdetail(NDP_ST_EXISTS), 0);
+
+  if (case_only) { /* two steps through a temporary name so the OS does not see "the target exists" */
+    snprintf(tmp, sizeof tmp, "%s.ndp-ren", from);
+    if (fs->stat(fs->ctx, tmp, &st) == NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_EXISTS, "a leftover temporary name is in the way", 0);
+    if (fs->rename(fs->ctx, from, tmp) != NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "could not rename (left in place)", 0);
+    if (fs->rename(fs->ctx, tmp, to) != NDP_OK) {
+      (void)fs->rename(fs->ctx, tmp, from); /* put it back */
+      return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "could not rename (left in place)", 0);
+    }
+  } else if (fs->rename(fs->ctx, from, to) != NDP_OK) {
+    return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "could not rename (left in place)", 0);
+  }
+
+  ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
+  ndp_tlv_put_str(&w, NDP_TAG_NEW_PATH, to);
+  return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
+}

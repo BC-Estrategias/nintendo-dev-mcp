@@ -522,6 +522,103 @@ static void test_delete(void) {
   CHECK(is_err(del("/luma"), NDP_ST_PROTECTED_PATH), "never_write still wins with a wide root");
 }
 
+/* ---- FS_RENAME ---- */
+static resp_t ren(const char *from, const char *to) {
+  treq t; treq_init(&t);
+  ndp_tlv_put_str(&t.w, NDP_TAG_PATH, from);
+  ndp_tlv_put_str(&t.w, NDP_TAG_NEW_PATH, to);
+  return frame(&g_agent, NDP_KIND_REQ, ++g_id, NDP_CMD_FS_RENAME, t.b, t.w.len);
+}
+/* does directory `rel` list exactly this name (case-sensitive, unlike exists() on a case-insensitive host)? */
+static int lists(const char *rel, const char *name) {
+  char p[256], cmd[600]; full(p, sizeof p, rel);
+  snprintf(cmd, sizeof cmd, "ls -1 '%s' | grep -x -F -- '%s' >/dev/null", p, name);
+  return system(cmd) == 0;
+}
+
+static void test_rename(void) {
+  resp_t r;
+  const uint8_t *v; size_t l;
+  ndp_agent_close(&g_agent);
+  g_ops = g_real_ops;
+  new_agent(NDP_MODE_DEVELOPMENT);
+
+  put(DIR "/r1.txt", "R1", 2);
+  r = ren(DIR "/r1.txt", DIR "/r1-renamed.txt");
+  CHECK(is_res(r) && ndp_tlv_find(r.buf, r.len, NDP_TAG_NEW_PATH, &v, &l) && l == strlen(DIR "/r1-renamed.txt") &&
+            memcmp(v, DIR "/r1-renamed.txt", l) == 0, "rename replies with the new path");
+  CHECK(!exists(DIR "/r1.txt") && content_is(DIR "/r1-renamed.txt", "R1", 2), "renamed, content intact");
+
+  mk(DIR "/rdir");
+  r = ren(DIR "/r1-renamed.txt", DIR "/rdir/moved.txt");
+  CHECK(is_res(r) && content_is(DIR "/rdir/moved.txt", "R1", 2) && !exists(DIR "/r1-renamed.txt"), "moved into a folder");
+
+  /* never overwrites */
+  put(DIR "/r2.txt", "R2", 2); put(DIR "/r3.txt", "R3", 2);
+  r = ren(DIR "/r2.txt", DIR "/r3.txt");
+  CHECK(is_err(r, NDP_ST_EXISTS), "destination exists -> EXISTS");
+  CHECK(content_is(DIR "/r2.txt", "R2", 2) && content_is(DIR "/r3.txt", "R3", 2), "nothing changed");
+  CHECK(is_err(ren(DIR "/r2.txt", DIR "/nope/x.txt"), NDP_ST_NOT_FOUND) && exists(DIR "/r2.txt"), "missing destination folder");
+  CHECK(is_err(ren(DIR "/ghost.txt", DIR "/g2.txt"), NDP_ST_NOT_FOUND), "missing source");
+  CHECK(is_err(ren(DIR "/r2.txt", DIR "/r2.txt"), NDP_ST_EXISTS), "same path");
+
+  /* a whole folder moves as a unit; a folder cannot go inside itself */
+  mk(DIR "/fa"); mk(DIR "/fa/sub"); put(DIR "/fa/a.txt", "A", 1); put(DIR "/fa/sub/b.txt", "B", 1);
+  r = ren(DIR "/fa", DIR "/fb");
+  CHECK(is_res(r) && !exists(DIR "/fa") && content_is(DIR "/fb/a.txt", "A", 1) && content_is(DIR "/fb/sub/b.txt", "B", 1), "folder renamed with its children");
+  CHECK(is_err(ren(DIR "/fb", DIR "/fb/inside"), NDP_ST_BAD_REQUEST) && exists(DIR "/fb/a.txt"), "folder into itself");
+  CHECK(is_err(ren(DIR "/fb", DIR "/fb/sub/deeper"), NDP_ST_BAD_REQUEST), "folder into its own child");
+
+  /* configured roots, the trash, and protected zones */
+  CHECK(is_err(ren(DIR, DIR "-x"), NDP_ST_PROTECTED_PATH), "the write root itself cannot be renamed");
+  CHECK(is_err(ren("/", DIR "/x"), NDP_ST_PROTECTED_PATH), "the filesystem root");
+  CHECK(is_err(ren(DIR "/r2.txt", "/other/r2.txt"), NDP_ST_PROTECTED_PATH) && exists(DIR "/r2.txt"), "destination outside the write roots");
+  CHECK(is_err(ren("/other/x", DIR "/x"), NDP_ST_PROTECTED_PATH), "source outside the write roots");
+  CHECK(is_err(ren(DIR "/r2.txt", "/luma/r2.txt"), NDP_ST_PROTECTED_PATH), "destination in a protected zone");
+  CHECK(is_err(ren(DIR "/r2.txt", DIR "/config/r2.txt"), NDP_ST_PROTECTED_PATH), "destination in the agent config");
+  CHECK(is_err(ren(DIR "/r2.txt", DIR "/.ndp-trash/r2.txt"), NDP_ST_PROTECTED_PATH) && exists(DIR "/r2.txt"), "cannot be moved into the trash (that is what delete is for)");
+
+  /* restoring from the trash is a rename out of it */
+  put(DIR "/r4.txt", "R4", 2);
+  CHECK(is_res(del(DIR "/r4.txt")), "delete first");
+  r = ren(DIR "/.ndp-trash/r4.txt", DIR "/r4-restored.txt");
+  CHECK(is_res(r) && content_is(DIR "/r4-restored.txt", "R4", 2) && !exists(DIR "/.ndp-trash/r4.txt"), "restored from the trash");
+  CHECK(is_err(ren(DIR "/.ndp-trash", DIR "/trash2"), NDP_ST_PROTECTED_PATH), "the trash folder itself");
+
+  /* only the capitalization changes (FAT is case-insensitive) */
+  put(DIR "/CaseTest.txt", "C", 1);
+  r = ren(DIR "/CaseTest.txt", DIR "/casetest.txt");
+  CHECK(is_res(r) && lists(DIR, "casetest.txt") && !lists(DIR, "CaseTest.txt") && content_is(DIR "/casetest.txt", "C", 1), "case-only rename");
+  CHECK(!lists(DIR, "CaseTest.txt.ndp-ren") && !lists(DIR, "casetest.txt.ndp-ren"), "no temporary name left behind");
+
+  { /* a folder the owner opened as a write root cannot be renamed away from under the configuration */
+    ndp_policy pol;
+    mk(DIR "/inbox2"); mk(DIR "/inbox2/x");
+    ndp_policy_init_default(&pol);
+    pol.write_roots.count = 0;
+    ndp_pathlist_add(&pol.write_roots, DIR);
+    ndp_pathlist_add(&pol.write_roots, DIR "/inbox2");
+    g_agent.policy = pol;
+    CHECK(is_err(ren(DIR "/inbox2", DIR "/inbox3"), NDP_ST_PROTECTED_PATH) && exists(DIR "/inbox2/x"), "a configured write root cannot be renamed");
+    CHECK(is_res(ren(DIR "/inbox2/x", DIR "/x-out")), "what is inside it can be moved");
+    ndp_policy_init_default(&pol);
+    g_agent.policy = pol;
+  }
+
+  /* a failing rename leaves the source alone; gating by mode; malformed */
+  put(DIR "/r5.txt", "R5", 2);
+  g_ops = g_real_ops; g_ops.rename = w_rename; g_rename_calls = 0; g_rename_fail_at = 1;
+  ndp_agent_close(&g_agent); new_agent(NDP_MODE_DEVELOPMENT);
+  r = ren(DIR "/r5.txt", DIR "/r5b.txt");
+  CHECK(is_err(r, NDP_ST_IO_ERROR) && content_is(DIR "/r5.txt", "R5", 2) && !exists(DIR "/r5b.txt"), "a failing rename leaves the source in place");
+  g_rename_fail_at = 0; g_ops = g_real_ops;
+  ndp_agent_close(&g_agent); new_agent(NDP_MODE_READ_ONLY);
+  CHECK(is_err(ren(DIR "/r5.txt", DIR "/r5c.txt"), NDP_ST_FORBIDDEN_MODE) && exists(DIR "/r5.txt"), "READ_ONLY forbids rename");
+  ndp_agent_close(&g_agent); new_agent(NDP_MODE_DEVELOPMENT);
+  { treq t; treq_init(&t); ndp_tlv_put_str(&t.w, NDP_TAG_PATH, DIR "/r5.txt");
+    CHECK(is_err(frame(&g_agent, NDP_KIND_REQ, ++g_id, NDP_CMD_FS_RENAME, t.b, t.w.len), NDP_ST_BAD_REQUEST), "new_path is required"); }
+}
+
 int main(void) {
   char tmpl[] = "/tmp/ndp-w-test-XXXXXX", tmpl2[] = "/tmp/ndp-w-other-XXXXXX", cmd[200];
   if (!mkdtemp(tmpl) || !mkdtemp(tmpl2)) { perror("mkdtemp"); return 2; }
@@ -542,6 +639,7 @@ int main(void) {
   test_faults();
   test_symlinks();
   test_delete();
+  test_rename();
 
   ndp_agent_close(&g_agent);
   snprintf(cmd, sizeof cmd, "rm -rf %s %s", g_root, g_other);

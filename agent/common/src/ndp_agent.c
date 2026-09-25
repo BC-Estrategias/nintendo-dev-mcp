@@ -181,6 +181,7 @@ static size_t handle_inner(ndp_agent *a, const ndp_header *req, const uint8_t *p
     if (req->command == NDP_CMD_FS_WRITE) return ndp_agent_write_start(a, req, payload, out, cap);
     if (req->command == NDP_CMD_FS_MKDIR) return ndp_agent_mkdir(a, req, payload, out, cap);
     if (req->command == NDP_CMD_FS_DELETE) return ndp_agent_delete(a, req, payload, out, cap);
+    if (req->command == NDP_CMD_FS_RENAME) return ndp_agent_rename(a, req, payload, out, cap);
   }
   return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_COMMAND, "unknown command", 0);
 }

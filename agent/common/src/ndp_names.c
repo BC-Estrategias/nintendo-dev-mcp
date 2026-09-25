@@ -11,6 +11,7 @@ const char *ndp_command_name(uint16_t command) {
     case NDP_CMD_FS_READ: return "FS_READ";
     case NDP_CMD_FS_WRITE: return "FS_WRITE";
     case NDP_CMD_FS_MKDIR: return "FS_MKDIR";
+    case NDP_CMD_FS_RENAME: return "FS_RENAME";
     case NDP_CMD_FS_DELETE: return "FS_DELETE";
     default: return "?";
   }

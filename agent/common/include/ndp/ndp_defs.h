@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define NDP_AGENT_VERSION "1.1.1"
+#define NDP_AGENT_VERSION "1.2.0"
 #define NDP_PROTOCOL_VERSION 1
 #define NDP_HEADER_SIZE 20
 #define NDP_MAC_SIZE 16
@@ -37,6 +37,7 @@ enum ndp_command {
   NDP_CMD_FS_READ = 0x0022,
   NDP_CMD_FS_WRITE = 0x0030,
   NDP_CMD_FS_MKDIR = 0x0031,
+  NDP_CMD_FS_RENAME = 0x0032,
   NDP_CMD_FS_DELETE = 0x0033
 };
 
@@ -121,7 +122,8 @@ enum ndp_tag {
   NDP_TAG_SYS_MEM_TOTAL = 0x0054,
   NDP_TAG_SYS_MEM_FREE = 0x0055,
   NDP_TAG_SD_TOTAL = 0x0056,
-  NDP_TAG_SD_FREE = 0x0057
+  NDP_TAG_SD_FREE = 0x0057,
+  NDP_TAG_NEW_PATH = 0x0058
 };
 
 /* Entries a filtered (traversal) FS_LIST reads per response, shown or not. */

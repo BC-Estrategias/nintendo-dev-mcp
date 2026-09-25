@@ -24,6 +24,7 @@ export const Command = {
   FS_READ: 0x0022,
   FS_WRITE: 0x0030,
   FS_MKDIR: 0x0031,
+  FS_RENAME: 0x0032,
   FS_DELETE: 0x0033,
 } as const;
 
@@ -112,6 +113,7 @@ export const Tag = {
   SYS_MEM_FREE: 0x0055,
   SD_TOTAL: 0x0056,
   SD_FREE: 0x0057,
+  NEW_PATH: 0x0058,
 } as const;
 
 export type Mode = "READ_ONLY" | "DEVELOPMENT" | "FULL";

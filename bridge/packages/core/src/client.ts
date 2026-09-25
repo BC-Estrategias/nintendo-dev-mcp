@@ -649,6 +649,20 @@ export class NdpClient {
   }
 
   /**
+   * Moves or renames a file or folder (agent >= 1.2.0). Never overwrites: an existing destination fails with EXISTS.
+   * Both paths must be writable; items cannot be moved INTO the trash (that is what delete does) but can be moved out of it.
+   * Returns the destination path as the console normalized it.
+   */
+  async rename(from: string, to: string): Promise<string> {
+    const res = await this.request(
+      Command.FS_RENAME,
+      encodeTlv([[Tag.PATH, str(normalizePath(from))], [Tag.NEW_PATH, str(normalizePath(to))]]),
+      SLOW_FS_TIMEOUT_MS,
+    );
+    return parseTlv(res.payload).str(Tag.NEW_PATH) ?? normalizePath(to);
+  }
+
+  /**
    * Uploads `size` bytes produced by `chunks` to `path` (temp file + verify + rename on the device).
    * `sha256` (the digest of the whole content) is sent up front so the device can refuse a corrupt
    * transfer before touching anything; the digest it computes is checked again here.

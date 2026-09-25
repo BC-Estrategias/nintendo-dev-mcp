@@ -35,6 +35,7 @@ Usage:
                                                   upload (temp file + verify + rename on the device);
                                                   refuses to overwrite unless --replace
   ndev mkdir <host[:port]> <path>                 create a directory (the parent must exist)
+  ndev mv    <host[:port]> <from> <to>            move/rename a file or folder (never overwrites; also restores from the trash)
   ndev rm    <host[:port]> <path>...              move files/folders to the device's trash
                                                   (<write root>/.ndp-trash/); nothing is destroyed
 
@@ -174,7 +175,7 @@ async function main(argv: string[]): Promise<number> {
       client.close();
     }
   }
-  if (!["hello", "ping", "info", "access", "ls", "stat", "cat", "get", "put", "mkdir", "rm"].includes(cmd) || !target) {
+  if (!["hello", "ping", "info", "access", "ls", "stat", "cat", "get", "put", "mkdir", "mv", "rm"].includes(cmd) || !target) {
     console.error(USAGE);
     return 2;
   }
@@ -277,6 +278,15 @@ async function main(argv: string[]): Promise<number> {
     return withClient(target, async (client) => {
       await client.mkdir(path);
       console.log(`created ${path}`);
+      return 0;
+    });
+  }
+
+  if (cmd === "mv") {
+    const [from, to] = parseFlags(rest, []).rest;
+    if (!from || !to) throw new Error("mv needs <from> and <to>");
+    return withClient(target, async (client) => {
+      console.log(`${from} -> ${await client.rename(from, to)}`);
       return 0;
     });
   }
