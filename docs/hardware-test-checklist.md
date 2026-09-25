@@ -151,3 +151,11 @@ node $M ls $IP /luma               # PROTECTED_PATH
 - Abra 6 pastas e tente a 7ª: `List full`.
 **Coletar:** foto do menu (top e bottom), a saída de `access`/`ls`, e o `agent.log` (linhas `[ACCESS] ...`).
 
+
+## Release 1.0.0 — verificação rápida no console
+1. Instale/abra o v1.0.0 (3dsx ou CIA). A tela mostra `Mode : READ_ONLY (no writes)` e `Auth : required - N paired`.
+2. `ndev put <ip> --text x /3ds/nintendo-dev-agent/t.txt` deve falhar com `FORBIDDEN_MODE`. Aperte **X**: agora funciona. Aperte **X** de novo: volta a `READ_ONLY`.
+3. **A** → menu de pastas: `/luma/plugins` aceita `[RW]`; `/luma` só leitura (mensagem "System folder"); `/boot.firm` e a pasta `config/` do agente nunca graváveis.
+4. `ndev access <ip>` mostra o mesmo que o menu. Feche `/` se o tiver deixado aberto.
+5. SELECT duas vezes esquece os pareamentos; `ndev pair` de novo funciona.
+

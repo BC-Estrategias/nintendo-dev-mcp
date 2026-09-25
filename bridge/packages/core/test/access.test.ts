@@ -3,7 +3,7 @@
 import { strict as assert } from "node:assert";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -113,7 +113,11 @@ suite("owner-chosen folders over TCP", () => {
     try {
       await c.hello();
       await assert.rejects(c.list("/roms/gba/../nds"), (e) => e instanceof Error);
-      assert.deepEqual(names(await c.list("/ROMS/GBA")), ["game.gba"], "FAT is case-insensitive: the same folder");
+      // The POLICY folds ASCII case (FAT on the console is case-insensitive). Whether the folder is then found depends on
+      // the host file system standing in for the SD card: macOS/Windows are case-insensitive, Linux is not.
+      const hostIsCaseInsensitive = existsSync(join(root, "ROMS"));
+      if (hostIsCaseInsensitive) assert.deepEqual(names(await c.list("/ROMS/GBA")), ["game.gba"], "the same folder");
+      else await assert.rejects(c.list("/ROMS/GBA"), (e) => e instanceof NdpRemoteError && e.status === Status.NOT_FOUND, "allowed by policy, absent on a case-sensitive host");
       await assert.rejects(c.list("/ROMS/NDS"), (e) => e instanceof NdpRemoteError && e.status === Status.PROTECTED_PATH);
     } finally {
       c.close();

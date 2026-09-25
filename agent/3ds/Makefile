@@ -24,6 +24,10 @@ APP_AUTHOR      := BC Estrategias
 ARCH    := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 
 CFLAGS  := -g -Wall -Wextra -O2 -mword-relocations -ffunction-sections -std=gnu99 $(ARCH)
+# NDEV_DEV=1 makes a developer build that starts with writes enabled (default: READ_ONLY)
+ifeq ($(NDEV_DEV),1)
+CFLAGS  += -DAGENT_START_MODE=NDP_MODE_DEVELOPMENT
+endif
 # the main thread's stack is small (32 KB by default): no single function may take more than 4 KB of it
 CFLAGS  += -Werror=stack-usage=4096
 CFLAGS  += $(INCLUDE) -D__3DS__

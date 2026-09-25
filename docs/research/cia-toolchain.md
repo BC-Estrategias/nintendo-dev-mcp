@@ -10,7 +10,7 @@ Ferramentas (em `third_party/bin/`, fora do Git, compiladas localmente):
 
 Decisões:
 - **Serviços/permissões** modelados num CIA homebrew que já funciona no console (o do TMC3DS): `APT:U`, `ac:u`, `soc:U`, `cfg:u`, `fs:USER`, `gsp::Gpu`, `hid:USER`, `ndm:u`, `ps:ps` (aleatório seguro do pareamento), `DirectSdmc/DirectSdmcWrite`. Memória: `SystemMode: 64MB`, sem modo estendido.
-- **Versão:** este `makerom` descarta os bits de "minor" do `-ver`; por isso a versão instalada é `(minor<<10)|patch` (0.6.3 aparece como 6.0.3): sempre crescente, o que basta para o FBI atualizar no lugar.
+- **Versão:** este `makerom` descarta os bits de "minor" do `-ver`; por isso a versão instalada é `((major*10+minor)<<10)|patch` (1.0.0 aparece como 10.0.0; 0.6.3 foi 6.0.3): sempre crescente, o que basta para o FBI atualizar no lugar.
 - Banner/ícone gerados por `agent/3ds/cia/make_banner_assets.py` (PNG e WAV puros, sem bibliotecas); o ícone vem do `.smdh` do agente.
 - O CIA é um **aplicativo**: abrir pelo Home Menu fecha o jogo em andamento (igual ao 3dsx).
 - Não foi instalado nem testado no console (instalação é com o FBI, pela pessoa).

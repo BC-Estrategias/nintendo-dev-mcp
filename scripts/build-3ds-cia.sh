@@ -11,8 +11,9 @@ command -v bannertool >/dev/null || { echo "missing third_party/bin/bannertool";
 
 VERSION="$(sed -n 's/^#define NDP_AGENT_VERSION "\(.*\)"$/\1/p' agent/common/include/ndp/ndp_defs.h)"
 IFS=. read -r MAJOR MINOR MICRO <<<"$VERSION"
-# The installed CIA version. This makerom build drops the "minor" bits of -ver, so the agent's minor number goes in the
-# TMD "major" slot (0.6.3 -> 6.0.3): still strictly increasing, which is all FBI needs to update in place.
+# The installed CIA version. This makerom build drops the "minor" bits of -ver (its own VER_MINOR macro shadows the
+# enum), so the TMD "major" slot carries major*10+minor (1.0.0 -> 10, 0.6.3 -> 6): strictly increasing, which is all
+# FBI needs to update in place. Limits: major*10+minor <= 63 and micro <= 15.
 
 # the agent itself (also refreshes agent/3ds/nintendo-dev-agent.elf and .smdh)
 ./scripts/build-3ds.sh >/dev/null
@@ -25,7 +26,7 @@ bannertool makebanner -i "$W/banner.png" -a "$W/banner.wav" -o "$W/banner.bnr" >
 OUT="nintendo-dev-agent-v${VERSION}.cia"
 rm -f dist/nintendo-dev-agent*.cia
 makerom -f cia -o "dist/$OUT" -elf agent/3ds/nintendo-dev-agent.elf -rsf agent/3ds/cia/nintendo-dev-agent.rsf \
-  -icon agent/3ds/nintendo-dev-agent.smdh -banner "$W/banner.bnr" -ver "$(( (MINOR << 10) | MICRO ))" \
+  -icon agent/3ds/nintendo-dev-agent.smdh -banner "$W/banner.bnr" -ver "$(( ((MAJOR * 10 + MINOR) << 10) | MICRO ))" \
   -target t 2>&1 | grep -E "ERROR|error|Warning" || true
 [ -s "dist/$OUT" ] || { echo "makerom failed"; exit 1; }
 ( cd dist && shasum -a 256 "$OUT" | tee -a SHA256SUMS )

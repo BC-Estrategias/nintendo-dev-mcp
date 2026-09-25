@@ -1,34 +1,68 @@
 # Nintendo Dev MCP
 
-Torna um Nintendo 3DS com CFW um target remoto de desenvolvimento controlável por agentes de IA (Codex, Claude Code) via MCP. Arquitetura pensada para expandir a DSi e Switch.
+Turn a Nintendo 3DS running custom firmware (Luma3DS) into a remote development target that AI agents (Claude Code, Codex, …) can operate through [MCP](https://modelcontextprotocol.io) — over your own Wi-Fi, from your own computer. Nothing is hosted anywhere.
 
-**Status:** M0–M6 concluídos (agente 3DS com leitura/escrita/lixeira, CLI `ndev` e **servidor MCP**), validados no New 3DS, inclusive com um modelo real usando as ferramentas MCP. **Pareamento + HMAC por frame (v0.5.0)** validado no console. **Pastas escolhidas pelo dono no próprio 3DS (v0.6.0)** — o agente abre só com a própria pasta liberada e a pessoa libera o resto no console (botão A) — implementado e testado no Mac (incl. testes de mutação); **falta validar no console** (`docs/hardware-test-checklist.md`, seção M5 parte 3).
-
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — arquitetura, segurança, roadmap
-- [`docs/protocol/ndp-v1.md`](docs/protocol/ndp-v1.md) — especificação do protocolo NDP v1
-- [`docs/research/findings.md`](docs/research/findings.md) — pesquisa (ftpd, sys-ftpd, libctru, Luma3DS, MCP)
-
-## Estrutura
 ```
-agent/common/   núcleo C99 sem dependências de SO (frames, TLV, paths, política, SHA/HMAC, HELLO/PING)
-agent/host/     agente de teste para macOS/Linux (mesmo núcleo atrás de sockets POSIX)
-bridge/         TypeScript: @ndev/core (codec, cliente TCP, descoberta), @ndev/cli (`ndev`) e @ndev/mcp (servidor MCP)
-docs/protocol/  especificação + vetores de teste (gerados por uma implementação Python independente)
-tests/mcp-hello Compatibilidade MCP com Codex/Claude Code
+AI agent ⇄ MCP (stdio) ⇄ ndev bridge (your computer) ⇄ NDP v1 over TCP/Wi-Fi ⇄ Nintendo Dev Agent (3DS app)
 ```
 
-## Desenvolvimento (macOS/Linux)
-Requisitos: cmake, um compilador C, Node ≥ 22.18, Python 3.
+**Status (v1.0.0):** usable and tested on a New 3DS with Luma3DS 13.3.3 — read/write/delete-to-trash on the SD card, pairing with per-frame HMAC, folders chosen on the console, CLI and MCP server. Design notes and dead ends (3GX plugin inside a game, replacing the Game Notes applet) are in [`docs/research/`](docs/research).
 
+> This drives **real hardware**. Writes modify a real SD card. Read the safety model below before you enable them.
+
+## What you get
+- **`ndev` CLI** — `find`, `ls`, `cat`, `get`, `put`, `mkdir`, `rm` (moves to a trash folder, never deletes), `pair`, `access`.
+- **MCP server** (`@ndev/mcp`, 12 tools `nintendo_*`) — device info, list/stat/read/write/mkdir/delete, upload/download to a local sandbox folder, agent log. Auto-discovers the console when its IP changes (DHCP).
+- **3DS agent** — a normal 3DS app (`.3dsx` or `.cia`) with a small on-screen UI.
+
+## Safety model (short version)
+- **Starts READ_ONLY.** Press **X** on the console to allow writes (DEVELOPMENT mode). No network command can change the mode.
+- **You choose the folders**, on the console: press **A** → *Access folders* → **Y** cycles closed → read → read+write. By default only `/3ds/nintendo-dev-agent` is open. No network command can change this list.
+- **Protected system zones are never writable**, even if you open `/`: `/Nintendo 3DS`, `/luma` (except `/luma/plugins` and `/luma/titles`), `/boot.firm`, `/gm9`, `/private`, and the agent's own config.
+- **Pairing required.** Press **Y** on the console, then type the code it shows in `ndev pair <ip>`. The code never crosses the network; every frame after login is authenticated with HMAC-SHA-256 (integrity and authenticity, **not encryption** — file contents are visible on your LAN). The MCP server has **no** pairing tool, so an assistant cannot pair itself.
+- **Deleting never destroys**: items are moved to `<write root>/.ndp-trash/`. Writes are atomic (temp file → verify → rename) and never overwrite silently.
+- File contents returned to an assistant are treated as **untrusted data** (prompt-injection guidance is in the tool descriptions).
+- Everything is limited to the SD card. NAND is out of scope by design.
+
+Full details: [`ARCHITECTURE.md`](ARCHITECTURE.md) §4–5 and [`docs/protocol/ndp-v1.md`](docs/protocol/ndp-v1.md) §4, §11. Report security problems privately: see [`SECURITY.md`](SECURITY.md).
+
+## Quick start
+Requirements: a 3DS with Luma3DS and the Homebrew Launcher (or FBI to install a CIA), Wi-Fi, and on the computer Node ≥ 22.18.
+
+1. **Get the agent** onto the SD card: build it (below) or use `dist/nintendo-dev-agent-vX.Y.Z.3dsx` (`/3ds/...`) or `.cia` (install with FBI).
+2. **Open it** on the 3DS (it shows its IP and `Mode: READ_ONLY`).
+3. **Pair** (once per computer): press **Y** on the console, then
+   ```bash
+   node bridge/packages/cli/src/main.ts pair <console-ip>
+   ```
+4. **Look around**: `node bridge/packages/cli/src/main.ts ls <console-ip> /3ds/nintendo-dev-agent`
+5. **Open more folders** on the console (A → Access folders) and **allow writes** (X) only when you need them.
+6. **Use it from an assistant** — see [`docs/mcp.md`](docs/mcp.md) for the Claude Code / Codex registration.
+
+## Build
 ```bash
-./scripts/check.sh        # vetores em dia + build C (-Werror, ASan/UBSan) + testes C + tsc + testes TS
+./scripts/check.sh --3ds      # vectors, C (-Werror, ASan/UBSan), TypeScript, and the 3DS agent (needs devkitPro)
+./scripts/build-3ds-cia.sh    # optional: a .cia with a Home Menu icon (needs third_party/bin/makerom + bannertool, see docs/research/cia-toolchain.md)
+NDEV_DEV=1 ./scripts/build-3ds.sh   # developer build that starts with writes enabled
+```
+Try the protocol without a console: `./build/agent/host/ndp-host-agent --port 6464 -v --root /tmp/fake-sd` and point `ndev` at `127.0.0.1:6464`.
+
+## Repository map
+```
+agent/common/   portable C99 core (frames, TLV, paths, policy, SHA/HMAC, pairing, folder list)
+agent/posix/    sockets + file system backend shared by the 3DS agent and the host test agent
+agent/3ds/      the console app (libctru) and its CIA description
+agent/host/     the same core on macOS/Linux, for tests
+bridge/         TypeScript: @ndev/core (codec, client, discovery), @ndev/cli, @ndev/mcp
+docs/protocol/  NDP v1 specification + test vectors (generated by an independent Python implementation)
+docs/research/  measurements, findings and the experiments that did not pan out
+spike/          throwaway experiments (3GX plugin, Game Notes applet) — not part of the product
 ```
 
-Experimentar sem o console:
-```bash
-./build/agent/host/ndp-host-agent --port 6464 -v &
-node bridge/packages/cli/src/main.ts ping 127.0.0.1:6464
-```
+## Known limits
+- The agent is a foreground app: opening a game closes it (a Wi-Fi radio power-save adds ~100–200 ms after idle; creating a folder on the SD takes ~6 s).
+- Not tested on Old 3DS, on Windows with a real console, or with other firmware setups.
+- No encryption on the wire (authenticated only).
 
-## Licença
-[Apache-2.0](LICENSE). Veja `NOTICE`.
+## License
+[Apache-2.0](LICENSE). See [`NOTICE`](NOTICE). Third-party tools used for optional builds (makerom, bannertool, CTRPluginFramework, 3gxtool) are downloaded by you into `third_party/`, which is not part of this repository.

@@ -22,12 +22,12 @@
 
 #define AGENT_PORT NDP_DEFAULT_PORT
 
-/* DEVELOPMENT BUILD: the agent starts with writes ENABLED (only inside /3ds/nintendo-dev-agent, never in
- * /Nintendo 3DS, /luma, /boot.firm...). Every computer must be paired first (AGENT_AUTH_REQUIRED, spec §4),
- * but a paired computer can write right away. Switch to NDP_MODE_READ_ONLY before distributing
- * (ARCHITECTURE.md §5). X toggles the mode at run time. */
+/* The agent starts READ_ONLY: nothing can be written until the person at the console presses X (DEVELOPMENT mode).
+ * Even then writes only reach the folders opened in the on-console folder editor (A), never the protected system
+ * zones. A developer build that starts with writes already on is made with `NDEV_DEV=1 ./scripts/build-3ds.sh`.
+ * Every computer must be paired first (AGENT_AUTH_REQUIRED, spec §4). */
 #ifndef AGENT_START_MODE
-#define AGENT_START_MODE NDP_MODE_DEVELOPMENT
+#define AGENT_START_MODE NDP_MODE_READ_ONLY
 #endif
 /* 1 = pairing + HMAC required (the default and the only setting fit for distribution); 0 = no auth (tests). */
 #ifndef AGENT_AUTH_REQUIRED
