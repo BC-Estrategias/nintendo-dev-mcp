@@ -105,7 +105,15 @@ Hash SHA-256 conferido contra o agente em todos os downloads.
 4. **O IP do 3DS mudou de um dia para o outro** (DHCP: `192.168.15.14` → `.17`; o MAC do `.14` passou a ser de outro aparelho). O Mac também mudou de IP. Achei o console varrendo a porta 6464 da /24. Isso eleva a prioridade da **descoberta automática** e de reservar IP no roteador.
 5. Ficaram arquivos de teste em `/3ds/nintendo-dev-agent/inbox/` (`t1..t5.txt`, `frio.txt`, `quente.txt`, `d1..d4/`) e `from-codex.txt(.bak)`; o agente não tem comando de remoção (por desenho) — apagar pelo cartão/outro app.
 
+## 2026-09-25 — diagnóstico do `mkdir` lento (agente v0.3.1, instrumentado)
+
+`WARN slow mkdir 5708 ms /3ds/nintendo-dev-agent/inbox/d5` — **a chamada `mkdir` do `sdmc:` (libctru) sozinha leva ~5,7 s**; nenhuma outra chamada (`stat`, `file_create`, `file_write`, `file_sync`, `file_close`, `rename`, `remove`) passou de 150 ms em todo o teste. Bridge total: 5934 ms. Upload de 3 MiB: **900 KiB/s** (3412 ms), sem nenhum aviso de lentidão.
+
+Causa **dentro** do `mkdir` do serviço de arquivos do console: desconhecida. Hipótese (não verificada): a criação de diretório dispara varredura/atualização da FAT do cartão (cartão grande), que criação de arquivo evita. Não há como corrigir no agente; contorno: **evitar `mkdir`** (uma vez por pasta, custo ~6 s) e esperar 30 s no Bridge. A primeira escrita de 5,8 s **continua sem explicação** (não reproduziu com a v0.3.1).
+
+**Vazão de escrita (2 medidas):** 611 KiB/s (240 KB, um arquivo) e 900 KiB/s (3 MiB).
+
 ## Pendências de medição
 - Separar SD × Wi-Fi na vazão de leitura (benchmark); **vazão de escrita de arquivo grande**.
-- Qual chamada de SD causa o `mkdir` de ~5,7 s e a primeira escrita de 5,8 s (v0.3.1 registra `WARN slow …`).
+- Por que a primeira escrita da sessão levou 5,8 s (não reproduzida); por que o `mkdir` do sistema demora ~5,7 s.
 - Custo de SHA-256 no ARM11.
