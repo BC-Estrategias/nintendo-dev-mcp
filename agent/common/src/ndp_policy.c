@@ -14,17 +14,26 @@ int ndp_pathlist_add(ndp_pathlist *l, const char *path) {
   return NDP_OK;
 }
 
+static const char *const DEFAULT_NEVER_READ[] = {"/3ds/nintendo-dev-agent/config"};
+static const char *const DEFAULT_NEVER_WRITE[] = {"/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private",
+                                                   "/3ds/nintendo-dev-agent/config"};
+
+int ndp_policy_default_zones(int write, const char *const **list) {
+  *list = write ? DEFAULT_NEVER_WRITE : DEFAULT_NEVER_READ;
+  return write ? (int)(sizeof DEFAULT_NEVER_WRITE / sizeof DEFAULT_NEVER_WRITE[0])
+               : (int)(sizeof DEFAULT_NEVER_READ / sizeof DEFAULT_NEVER_READ[0]);
+}
+
 void ndp_policy_init_default(ndp_policy *p) {
+  const char *const *z;
+  int i, n;
   memset(p, 0, sizeof *p);
   (void)ndp_pathlist_add(&p->read_roots, "/");
   (void)ndp_pathlist_add(&p->write_roots, "/3ds/nintendo-dev-agent");
-  (void)ndp_pathlist_add(&p->never_read, "/3ds/nintendo-dev-agent/config");
-  (void)ndp_pathlist_add(&p->never_write, "/Nintendo 3DS");
-  (void)ndp_pathlist_add(&p->never_write, "/luma");
-  (void)ndp_pathlist_add(&p->never_write, "/boot.firm");
-  (void)ndp_pathlist_add(&p->never_write, "/gm9");
-  (void)ndp_pathlist_add(&p->never_write, "/private");
-  (void)ndp_pathlist_add(&p->never_write, "/3ds/nintendo-dev-agent/config");
+  n = ndp_policy_default_zones(0, &z);
+  for (i = 0; i < n; i++) (void)ndp_pathlist_add(&p->never_read, z[i]);
+  n = ndp_policy_default_zones(1, &z);
+  for (i = 0; i < n; i++) (void)ndp_pathlist_add(&p->never_write, z[i]);
 }
 
 static int in_any(const ndp_pathlist *l, const char *path) {

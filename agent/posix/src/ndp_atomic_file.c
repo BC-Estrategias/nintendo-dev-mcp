@@ -34,7 +34,7 @@ long ndp_atomic_load(const char *path, uint8_t *buf, size_t cap, ndp_file_verify
 
 int ndp_atomic_save(const char *path, const uint8_t *bytes, size_t len, ndp_file_verify verify) {
   char tmp[PATH_LIMIT], bak[PATH_LIMIT];
-  uint8_t check[2048];
+  static uint8_t check[2048]; /* static: the 3DS main thread has a small stack; callers are single-threaded */
   FILE *f;
   if (len == 0 || len > sizeof check) return -EINVAL;
   if (strlen(path) + 5 >= sizeof tmp) return -ENAMETOOLONG;

@@ -29,19 +29,20 @@ ndp_level ndp_access_level(const ndp_access *a, const char *norm, ndp_level *exp
   return level_from(a, norm, -1);
 }
 
-static int inside_any(const ndp_pathlist *l, const char *norm) {
-  int i;
-  for (i = 0; i < l->count; i++)
-    if (ndp_path_inside(norm, l->entries[i])) return 1;
-  return 0;
-}
-
+/* Uses the constant zone tables: this runs for every row the console draws, and building a policy here would put
+ * ~8 KB on the (32 KB) stack of the 3DS's main thread. */
 int ndp_access_allowed(const char *norm, ndp_level level) {
-  ndp_policy guard;
-  ndp_policy_init_default(&guard);
+  const char *const *z;
+  int i, n;
   if (level == NDP_LVL_NONE) return 1;
-  if (inside_any(&guard.never_read, norm)) return 0;
-  if (level == NDP_LVL_WRITE && inside_any(&guard.never_write, norm)) return 0;
+  n = ndp_policy_default_zones(0, &z);
+  for (i = 0; i < n; i++)
+    if (ndp_path_inside(norm, z[i])) return 0;
+  if (level == NDP_LVL_WRITE) {
+    n = ndp_policy_default_zones(1, &z);
+    for (i = 0; i < n; i++)
+      if (ndp_path_inside(norm, z[i])) return 0;
+  }
   return 1;
 }
 

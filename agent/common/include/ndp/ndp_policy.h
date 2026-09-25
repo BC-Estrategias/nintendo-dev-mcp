@@ -28,6 +28,9 @@ int ndp_pathlist_add(ndp_pathlist *l, const char *path);
 /* Spec §10 defaults: read "/", write "/3ds/nintendo-dev-agent", plus the never_* zones. */
 void ndp_policy_init_default(ndp_policy *p);
 
+/* The built-in protected zones (the never_* defaults), without building a whole policy on the stack. */
+int ndp_policy_default_zones(int write, const char *const **list);
+
 /* Returns NDP_OK, NDP_ST_PATH_INVALID, NDP_ST_FORBIDDEN_MODE or NDP_ST_PROTECTED_PATH.
  * When `norm_out` is not NULL (NDP_PATH_MAX + 1 bytes) it receives the normalized path on success. */
 int ndp_policy_check(const ndp_policy *p, ndp_mode mode, int is_write, const uint8_t *path, size_t path_len,

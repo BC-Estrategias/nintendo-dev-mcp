@@ -24,6 +24,8 @@ APP_AUTHOR      := BC Estrategias
 ARCH    := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 
 CFLAGS  := -g -Wall -Wextra -O2 -mword-relocations -ffunction-sections -std=gnu99 $(ARCH)
+# the main thread's stack is small (32 KB by default): no single function may take more than 4 KB of it
+CFLAGS  += -Werror=stack-usage=4096
 CFLAGS  += $(INCLUDE) -D__3DS__
 
 ASFLAGS := -g $(ARCH)

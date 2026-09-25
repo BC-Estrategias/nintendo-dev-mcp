@@ -201,7 +201,7 @@ static void keys_changed(void *ctx, const ndp_keystore *keys) {
 
 /* Applies the owner's list as the access policy and saves it. Called by the folder editor after each change. */
 static int access_changed(const ndp_access *list) {
-  ndp_policy pol;
+  static ndp_policy pol; /* ~8 KB: static, the main thread's stack is only 32 KB */
   int rc;
   ndp_access_to_policy(list, &pol);
   ndp_server_set_policy(&g_srv, &pol);
@@ -500,7 +500,7 @@ int main(void) {
     ar = ndp_access_load_file(&g_access, ACCESS_FILE);
     if (ar < 0) alog("WARN: folder list is corrupt: ignored (only the agent's folder is open)");
     else if (ar == 0) alog("Loaded %d opened folder(s)", g_access.count);
-    { ndp_policy pol; ndp_access_to_policy(&g_access, &pol); ndp_server_set_policy(&g_srv, &pol); }
+    { static ndp_policy pol; ndp_access_to_policy(&g_access, &pol); ndp_server_set_policy(&g_srv, &pol); }
   }
   if (AGENT_AUTH_REQUIRED) {
     int lr = ndp_keystore_load_file(&g_keys, KEYS_FILE);
