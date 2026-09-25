@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the throwaway 3GX network spike against the (untracked) third_party CTRPluginFramework template.
-# Usage: NDEV_SPIKE_HOST=192,168,15,16 ./scripts/build-3gx-spike.sh
+# Usage: NDEV_SPIKE_HOST=192,168,15,16 [NDEV_SPIKE_TID=000400000017BA00] ./scripts/build-3gx-spike.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${NDEV_SPIKE_HOST:?set NDEV_SPIKE_HOST to this computer IPv4 as four comma-separated bytes, e.g. 192,168,15,16}"
@@ -16,12 +16,13 @@ mkdir "$B"
 cp -R "$T/Includes" "$T/3gx.ld" "$T/Makefile" "$T/Sources" "$B/"
 rm -f "$B/Sources/main.cpp"
 cp spike/3gx-net/Sources/main.cpp "$B/Sources/"
-cp spike/3gx-net/CTRPluginFramework.plgInfo "$B/"
+TID="${NDEV_SPIKE_TID:-0004000005A22D00}"
+sed "s|0x05A22D00|0x${TID:8}|" spike/3gx-net/CTRPluginFramework.plgInfo > "$B/CTRPluginFramework.plgInfo"
 sed -i.bak "s|-D__3DS__|-D__3DS__ -DNDEV_SPIKE_HOST=${NDEV_SPIKE_HOST}|" "$B/Makefile"
 make -C "$B" CTRPFLIB="$PWD/third_party/libctrpf" 2>&1 | grep -E "error|Error|undefined|creating" || true
 OUT="$(ls "$B"/*.3gx 2>/dev/null | head -1)"
 [ -n "$OUT" ] || { echo "build failed"; exit 1; }
 mkdir -p dist
-cp "$OUT" dist/ndev-spike-v0.0.5.3gx
-shasum -a 256 dist/ndev-spike-v0.0.5.3gx
-echo "built: dist/ndev-spike-v0.0.5.3gx"
+cp "$OUT" dist/ndev-spike-v0.0.6.3gx
+shasum -a 256 dist/ndev-spike-v0.0.6.3gx
+echo "built: dist/ndev-spike-v0.0.6.3gx"
