@@ -262,6 +262,7 @@ GitHub Actions: (1) testes do Bridge + host agent; (2) build do agente 3DS (imag
 | **M4** ✔ | `FS_READ` em streaming | `cat test.txt` = "Hello from Nintendo 3DS" no 3DS real; ~1 MiB/s |
 | **M5** ◐ | `FS_WRITE` atômico + `FS_MKDIR` + modos + proteção de paths ✔ (v0.3.0, testes no Mac); **pareamento/HMAC ✔ (v0.5.0, validado no console)**; **pastas escolhidas pelo dono ✔ (v0.6.0, testes no Mac; a validar no console)** | `from-codex.txt` no SD real (validado sem auth na v0.4.0) |
 | **M6** ✔ | Servidor MCP (stdio) com 12 ferramentas, descoberta automática, auditoria e sandbox local ([`docs/mcp.md`](docs/mcp.md)) | 13 testes ponta a ponta no Mac; **pendente:** teste com modelo real e com o console real |
+| M6b ✔ | CIA do agente (`scripts/build-3ds-cia.sh`, ver `docs/research/cia-toolchain.md`): ícone no Home Menu, sem o Homebrew Launcher | gerado e verificado (título/versão/ícone); instalação a testar no console |
 | M7 | `fs_upload/download`, `deploy_homebrew` (hash, backup, temp→rename; estudar `3dslink` antes) | build `.3dsx` do TMC3DS enviado e substituído |
 | M8 | Logs e crashes (+ parser Luma) | "analise o último crash" |
 | M9 | App desktop (UI + MCP em 127.0.0.1) | UI mostra a IA agindo |
