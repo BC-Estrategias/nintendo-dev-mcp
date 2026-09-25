@@ -8,6 +8,8 @@ export interface PolicyConfig {
   writeRoots: readonly string[];
   neverRead: readonly string[];
   neverWrite: readonly string[];
+  /** Folders inside a neverWrite zone that ARE writable (spec §11); optional, default none. */
+  writeExcept?: readonly string[];
 }
 
 export type Operation = "read" | "write";
@@ -31,6 +33,7 @@ export const DEFAULT_POLICY: PolicyConfig = Object.freeze({
     "/private",
     "/3ds/nintendo-dev-agent/config",
   ]),
+  writeExcept: Object.freeze(["/luma/plugins", "/luma/titles"]),
 });
 
 /** Normalizes every list entry; throws PathInvalidError for a bad entry. */
@@ -41,11 +44,20 @@ export function makePolicy(cfg: PolicyConfig): PolicyConfig {
     writeRoots: norm(cfg.writeRoots),
     neverRead: norm(cfg.neverRead),
     neverWrite: norm(cfg.neverWrite),
+    writeExcept: norm(cfg.writeExcept ?? []),
   });
 }
 
 function decide(status: StatusName, normalized?: string): PolicyDecision {
   return normalized === undefined ? { status, code: Status[status] } : { status, code: Status[status], normalized };
+}
+
+/** Spec §11: inside a never_write zone Z, unless an exception E has the path inside it and is a PROPER sub-folder of Z. */
+export function isWriteProtected(cfg: PolicyConfig, norm: string): boolean {
+  const exc = cfg.writeExcept ?? [];
+  return cfg.neverWrite.some(
+    (z) => pathInside(norm, z) && !exc.some((e) => pathInside(norm, e) && pathInside(e, z) && !pathInside(z, e)),
+  );
 }
 
 /** `cfg` must come from makePolicy (or be pre-normalized). Order of checks follows the spec. */
@@ -59,8 +71,8 @@ export function checkPolicy(cfg: PolicyConfig, mode: Mode, op: Operation, path: 
   }
   const write = op === "write";
   if (write && mode === "READ_ONLY") return decide("FORBIDDEN_MODE");
-  const never = write ? cfg.neverWrite : cfg.neverRead;
-  if (never.some((n) => pathInside(normalized, n))) return decide("PROTECTED_PATH");
+  if (write ? isWriteProtected(cfg, normalized) : cfg.neverRead.some((n) => pathInside(normalized, n)))
+    return decide("PROTECTED_PATH");
   const roots = write ? cfg.writeRoots : cfg.readRoots;
   if (!roots.some((r) => pathInside(normalized, r))) return decide("PROTECTED_PATH");
   return decide("OK", normalized);

@@ -111,6 +111,7 @@ static void cycle_selected(void) {
   next = ndp_access_next(g.list, path);
   if (next == exp) {
     if (!ndp_access_allowed(path, NDP_LVL_READ)) say(true, "Protected: this folder can never be opened.");
+    else if (eff >= NDP_LVL_READ && !ndp_access_allowed(path, NDP_LVL_WRITE)) say(true, "System folder: read only, never writable.");
     else if (eff > exp) say(true, "Already open through its parent (%s).", level_name(eff));
     else say(true, "Nothing to change here.");
     return;

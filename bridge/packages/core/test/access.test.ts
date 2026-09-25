@@ -41,7 +41,7 @@ suite("owner-chosen folders over TCP", () => {
   before(() => {
     dir = mkdtempSync(join(tmpdir(), "ndp-access-"));
     root = join(dir, "sd");
-    for (const d of ["roms/gba", "roms/nds", "luma", "3ds/nintendo-dev-agent", "3ds/other", "cias"]) mkdirSync(join(root, d), { recursive: true });
+    for (const d of ["roms/gba", "roms/nds", "luma/plugins", "luma/payloads", "3ds/nintendo-dev-agent", "3ds/other", "cias"]) mkdirSync(join(root, d), { recursive: true });
     writeFileSync(join(root, "roms/gba/game.gba"), "GBA");
     writeFileSync(join(root, "roms/nds/x.nds"), "NDS");
     writeFileSync(join(root, "roms/note.txt"), "n");
@@ -131,6 +131,27 @@ suite("owner-chosen folders over TCP", () => {
     try {
       await c.hello();
       assert.deepEqual((await c.accessInfo()).readRoots, ["/3ds/nintendo-dev-agent"]);
+    } finally {
+      c.close();
+    }
+  });
+
+  test("/luma stays protected, except its plugins and titles folders (spec §11)", async () => {
+    const { port } = await agentFor([["/luma", 1], ["/luma/plugins", 2]]);
+    const c = await NdpClient.connect({ host: "127.0.0.1", port });
+    const put = (p: string) => {
+      const d = Buffer.from("x");
+      return c.write(p, { size: 1, sha256: new Uint8Array(createHash("sha256").update(d).digest()), chunks: [d] });
+    };
+    try {
+      await c.hello();
+      assert.equal((await c.list("/luma")).length, 3, "readable");
+      assert.equal((await put("/luma/plugins/game.3gx")).written, 1);
+      const d = await c.delete("/luma/plugins/game.3gx");
+      assert.ok(d.trashPath.startsWith("/luma/plugins/.ndp-trash/"), d.trashPath);
+      for (const bad of ["/luma/config.ini", "/luma/payloads/x.firm", "/luma/pluginsx"])
+        await assert.rejects(put(bad), (e) => e instanceof NdpRemoteError && e.status === Status.PROTECTED_PATH, bad);
+      await assert.rejects(c.mkdir("/luma/newdir"), (e) => e instanceof NdpRemoteError && e.status === Status.PROTECTED_PATH);
     } finally {
       c.close();
     }

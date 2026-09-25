@@ -105,7 +105,7 @@ test("policy", () => {
   const cfgs = Object.fromEntries(
     Object.entries(V.policy_configs as Record<string, any>).map(([k, c]) => [
       k,
-      makePolicy({ readRoots: c.read_roots, writeRoots: c.write_roots, neverRead: c.never_read, neverWrite: c.never_write }),
+      makePolicy({ readRoots: c.read_roots, writeRoots: c.write_roots, neverRead: c.never_read, neverWrite: c.never_write, writeExcept: c.write_except ?? [] }),
     ]),
   );
   for (const e of V.policy) {
@@ -132,7 +132,7 @@ test("tlv: first occurrence wins, overrun is malformed", () => {
 test("traversal (spec §11.1) agrees with the reference", () => {
   const cfgs = Object.fromEntries(
     Object.entries(V.policy_configs as Record<string, any>).map(([k, c]) => [
-      k, makePolicy({ readRoots: c.read_roots, writeRoots: c.write_roots, neverRead: c.never_read, neverWrite: c.never_write }),
+      k, makePolicy({ readRoots: c.read_roots, writeRoots: c.write_roots, neverRead: c.never_read, neverWrite: c.never_write, writeExcept: c.write_except ?? [] }),
     ]),
   );
   assert.ok(V.traverse.length > 40);

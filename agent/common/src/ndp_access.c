@@ -32,16 +32,16 @@ ndp_level ndp_access_level(const ndp_access *a, const char *norm, ndp_level *exp
 /* Uses the constant zone tables: this runs for every row the console draws, and building a policy here would put
  * ~8 KB on the (32 KB) stack of the 3DS's main thread. */
 int ndp_access_allowed(const char *norm, ndp_level level) {
-  const char *const *z;
-  int i, n;
+  const char *const *z, *const *x;
+  int i, n, nx;
   if (level == NDP_LVL_NONE) return 1;
   n = ndp_policy_default_zones(0, &z);
   for (i = 0; i < n; i++)
     if (ndp_path_inside(norm, z[i])) return 0;
   if (level == NDP_LVL_WRITE) {
     n = ndp_policy_default_zones(1, &z);
-    for (i = 0; i < n; i++)
-      if (ndp_path_inside(norm, z[i])) return 0;
+    nx = ndp_policy_default_zones(2, &x);
+    if (ndp_write_protected(z, n, x, nx, norm)) return 0;
   }
   return 1;
 }

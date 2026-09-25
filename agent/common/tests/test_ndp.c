@@ -218,7 +218,7 @@ static void test_policy(void) {
   int i;
   ndp_policy def;
   ndp_policy_init_default(&def);
-  CHECK(def.read_roots.count == 1 && def.write_roots.count == 1 && def.never_write.count == 6, "default lists");
+  CHECK(def.read_roots.count == 1 && def.write_roots.count == 1 && def.never_write.count == 6 && def.write_except.count == 2, "default lists");
   for (i = 0; i < V_POLICY_N; i++) {
     const v_policy_t *e = &v_policies[i];
     ndp_policy p;
@@ -227,6 +227,7 @@ static void test_policy(void) {
     load_list(&p.write_roots, v_cfgs[e->cfg].write_roots);
     load_list(&p.never_read, v_cfgs[e->cfg].never_read);
     load_list(&p.never_write, v_cfgs[e->cfg].never_write);
+    load_list(&p.write_except, v_cfgs[e->cfg].write_except);
     rc = ndp_policy_check(&p, (ndp_mode)e->mode, e->write, e->path, e->path_len, NULL);
     CHECK(rc == e->status, "policy #%d cfg=%d mode=%d write=%d expected %d got %d", i, e->cfg, e->mode, e->write,
           e->status, rc);
@@ -419,6 +420,7 @@ static void test_traversal_and_access(void) {
     load_list(&p.write_roots, v_cfgs[e->cfg].write_roots);
     load_list(&p.never_read, v_cfgs[e->cfg].never_read);
     load_list(&p.never_write, v_cfgs[e->cfg].never_write);
+    load_list(&p.write_except, v_cfgs[e->cfg].write_except);
     CHECK(ndp_policy_traversable(&p, e->path) == e->traversable, "traversable cfg=%d %s", e->cfg, e->path);
     CHECK(ndp_policy_child_visible(&p, e->path) == e->visible, "visible cfg=%d %s", e->cfg, e->path);
   }

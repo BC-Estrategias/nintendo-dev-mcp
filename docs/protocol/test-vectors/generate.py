@@ -139,6 +139,7 @@ CONFIGS = {
         "never_read": ["/3ds/nintendo-dev-agent/config"],
         "never_write": ["/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private",
                         "/3ds/nintendo-dev-agent/config"],
+        "write_except": ["/luma/plugins", "/luma/titles"],
     },
     "custom": {
         "read_roots": ["/roms", "/3ds"],
@@ -146,6 +147,7 @@ CONFIGS = {
         "never_read": ["/3ds/nintendo-dev-agent/config"],
         "never_write": ["/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private",
                         "/3ds/nintendo-dev-agent/config"],
+        "write_except": ["/luma/plugins", "/luma/titles"],
     },
     "narrow": {  # o dono liberou só duas pastas fundas: os ancestrais viram "travessia" (spec §11.1)
         "read_roots": ["/roms/gba", "/3ds/nintendo-dev-agent"],
@@ -153,6 +155,14 @@ CONFIGS = {
         "never_read": ["/3ds/nintendo-dev-agent/config"],
         "never_write": ["/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private",
                         "/3ds/nintendo-dev-agent/config"],
+        "write_except": ["/luma/plugins", "/luma/titles"],
+    },
+    "nested": {  # uma zona mais funda DENTRO de uma exceção volta a proteger
+        "read_roots": ["/"],
+        "write_roots": ["/luma", "/x"],
+        "never_read": [],
+        "never_write": ["/luma", "/luma/plugins/keep", "/x/y"],
+        "write_except": ["/luma/plugins", "/x", "/luma"],
     },
     "hidden": {  # uma raiz DENTRO de uma zona never_read: a zona vence, e ela não pode servir de caminho
         "read_roots": ["/a/b/c", "/ok"],
@@ -166,8 +176,19 @@ CONFIGS = {
         "never_read": ["/3ds/nintendo-dev-agent/config"],
         "never_write": ["/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private",
                         "/3ds/nintendo-dev-agent/config"],
+        "write_except": ["/luma/plugins", "/luma/titles"],
     },
 }
+
+
+def write_protected(cfg, p):
+    """§11: dentro de uma zona Z sem exceção E (p dentro de E, E sub-pasta PRÓPRIA de Z)."""
+    for z in cfg["never_write"]:
+        if not inside(p, z):
+            continue
+        if not any(inside(p, e) and inside(e, z) and not inside(z, e) for e in cfg.get("write_except", [])):
+            return True
+    return False
 
 
 def policy_check(cfg, mode, op, raw: bytes):
@@ -177,8 +198,10 @@ def policy_check(cfg, mode, op, raw: bytes):
         return "PATH_INVALID"
     if op == "write" and mode == "READ_ONLY":
         return "FORBIDDEN_MODE"
-    never = cfg["never_write" if op == "write" else "never_read"]
-    if any(inside(p, n) for n in never):
+    if op == "write":
+        if write_protected(cfg, p):
+            return "PROTECTED_PATH"
+    elif any(inside(p, n) for n in cfg["never_read"]):
         return "PROTECTED_PATH"
     roots = cfg["write_roots" if op == "write" else "read_roots"]
     if not any(inside(p, r) for r in roots):
@@ -211,7 +234,7 @@ def access_allowed(p, level):
         return True
     if any(inside(p, n) for n in DEF_NEVER_READ):
         return False
-    if level == 2 and any(inside(p, n) for n in DEF_NEVER_WRITE):
+    if level == 2 and write_protected(CONFIGS["default"], p):
         return False
     return True
 
@@ -757,6 +780,22 @@ def build():
         ("default", "DEVELOPMENT", "write", b"/a/../luma/x"),
         ("default", "DEVELOPMENT", "write", b"/3ds/nintendo-dev-agent/../../luma/x"),
         ("default", "DEVELOPMENT", "write", b"/NINTEN~1/x"),
+        ("default", "DEVELOPMENT", "write", b"/luma/plugins/game.3gx"),
+        ("default", "DEVELOPMENT", "write", b"/luma/plugins"),
+        ("default", "DEVELOPMENT", "write", b"/luma/titles/0004000000000000/romfs/a.bin"),
+        ("default", "DEVELOPMENT", "write", b"/LUMA/PLUGINS/x"),
+        ("default", "DEVELOPMENT", "write", b"/luma/config.ini"),
+        ("default", "DEVELOPMENT", "write", b"/luma/payloads/x.firm"),
+        ("default", "DEVELOPMENT", "write", b"/luma/pluginsx/a"),
+        ("default", "DEVELOPMENT", "write", b"/luma/plugins/../config.ini"),
+        ("default", "DEVELOPMENT", "write", b"/luma"),
+        ("wide", "DEVELOPMENT", "write", b"/luma/plugins/a"),
+        ("wide", "DEVELOPMENT", "write", b"/luma/sysmodules/a.cxi"),
+        ("nested", "DEVELOPMENT", "write", b"/luma/plugins/y"),
+        ("nested", "DEVELOPMENT", "write", b"/luma/plugins/keep/z"),
+        ("nested", "DEVELOPMENT", "write", b"/luma/other"),
+        ("nested", "DEVELOPMENT", "write", b"/x/a"),
+        ("nested", "DEVELOPMENT", "write", b"/x/y/a"),
         ("default", "DEVELOPMENT", "read", b"relative"),
         ("default", "READ_ONLY", "write", b"bad\\path"),
         ("custom", "DEVELOPMENT", "write", b"/roms/gba/game.gba"),
@@ -819,6 +858,10 @@ def build():
         scenario("whole_card", [
             ("set", b"/", 1), ("next", b"/", 0), ("next", b"/roms", 0), ("set", b"/", 2), ("set", b"/Nintendo 3DS", 2),
             ("next", b"/", 0)]),
+        scenario("luma_exceptions", [
+            ("set", b"/luma/plugins", 2), ("set", b"/luma", 2), ("set", b"/luma/plugins/x", 2), ("set", b"/luma/titles", 2),
+            ("set", b"/luma/config.ini", 2), ("set", b"/luma/config.ini", 1), ("next", b"/luma", 0), ("next", b"/luma/payloads", 0),
+            ("next", b"/luma/plugins/y", 0), ("next", b"/luma/plugins", 0), ("next", b"/luma/titles", 0)]),
         scenario("empty", []),
     ]
     v["access"] = acc
@@ -946,7 +989,7 @@ def emit_h(v) -> str:
     # policy
     cfg_names = list(v["policy_configs"].keys())
     L.append("typedef struct { const char *read_roots[8]; const char *write_roots[8]; "
-             "const char *never_read[8]; const char *never_write[8]; } v_cfg_t;\n")
+             "const char *never_read[8]; const char *never_write[8]; const char *write_except[8]; } v_cfg_t;\n")
 
     def arr(xs):
         return "{" + ", ".join([c_str(x) for x in xs] + (["NULL"] if len(xs) < 8 else [])) + "}"
@@ -954,7 +997,7 @@ def emit_h(v) -> str:
     for n in cfg_names:
         c = v["policy_configs"][n]
         L.append(f"  {{{arr(c['read_roots'])}, {arr(c['write_roots'])}, {arr(c['never_read'])}, "
-                 f"{arr(c['never_write'])}}}, /* {n} */\n")
+                 f"{arr(c['never_write'])}, {arr(c.get('write_except', []))}}}, /* {n} */\n")
     L.append("};\n")
     for i, e in enumerate(v["policy"]):
         L.append(c_bytes(f"v_po_path_{i}", bytes.fromhex(e["path_hex"])))

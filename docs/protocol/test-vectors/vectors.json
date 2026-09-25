@@ -508,6 +508,10 @@
     "/gm9",
     "/private",
     "/3ds/nintendo-dev-agent/config"
+   ],
+   "write_except": [
+    "/luma/plugins",
+    "/luma/titles"
    ]
   },
   "custom": {
@@ -530,6 +534,10 @@
     "/gm9",
     "/private",
     "/3ds/nintendo-dev-agent/config"
+   ],
+   "write_except": [
+    "/luma/plugins",
+    "/luma/titles"
    ]
   },
   "narrow": {
@@ -550,6 +558,30 @@
     "/gm9",
     "/private",
     "/3ds/nintendo-dev-agent/config"
+   ],
+   "write_except": [
+    "/luma/plugins",
+    "/luma/titles"
+   ]
+  },
+  "nested": {
+   "read_roots": [
+    "/"
+   ],
+   "write_roots": [
+    "/luma",
+    "/x"
+   ],
+   "never_read": [],
+   "never_write": [
+    "/luma",
+    "/luma/plugins/keep",
+    "/x/y"
+   ],
+   "write_except": [
+    "/luma/plugins",
+    "/x",
+    "/luma"
    ]
   },
   "hidden": {
@@ -580,6 +612,10 @@
     "/gm9",
     "/private",
     "/3ds/nintendo-dev-agent/config"
+   ],
+   "write_except": [
+    "/luma/plugins",
+    "/luma/titles"
    ]
   }
  },
@@ -727,6 +763,134 @@
    "path_hex": "2f4e494e54454e7e312f78",
    "status": "PATH_INVALID",
    "status_code": 17
+  },
+  {
+   "config": "default",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f706c7567696e732f67616d652e336778",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "default",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f706c7567696e73",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "default",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f7469746c65732f303030343030303030303030303030302f726f6d66732f612e62696e",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "default",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f4c554d412f504c5547494e532f78",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "default",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f636f6e6669672e696e69",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "default",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f7061796c6f6164732f782e6669726d",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "default",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f706c7567696e73782f61",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "default",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f706c7567696e732f2e2e2f636f6e6669672e696e69",
+   "status": "PATH_INVALID",
+   "status_code": 17
+  },
+  {
+   "config": "default",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d61",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "wide",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f706c7567696e732f61",
+   "status": "OK",
+   "status_code": 0
+  },
+  {
+   "config": "wide",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f7379736d6f64756c65732f612e637869",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "nested",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f706c7567696e732f79",
+   "status": "OK",
+   "status_code": 0
+  },
+  {
+   "config": "nested",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f706c7567696e732f6b6565702f7a",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "nested",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f6c756d612f6f74686572",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
+  },
+  {
+   "config": "nested",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f782f61",
+   "status": "OK",
+   "status_code": 0
+  },
+  {
+   "config": "nested",
+   "mode": "DEVELOPMENT",
+   "op": "write",
+   "path_hex": "2f782f792f61",
+   "status": "PROTECTED_PATH",
+   "status_code": 4
   },
   {
    "config": "default",
@@ -1800,6 +1964,120 @@
     [
      "/",
      2
+    ]
+   ]
+  },
+  {
+   "name": "luma_exceptions",
+   "ops": [
+    {
+     "op": "set",
+     "path": "/luma/plugins",
+     "path_hex": "2f6c756d612f706c7567696e73",
+     "level": 2,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/luma",
+     "path_hex": "2f6c756d61",
+     "level": 2,
+     "expect": 4
+    },
+    {
+     "op": "set",
+     "path": "/luma/plugins/x",
+     "path_hex": "2f6c756d612f706c7567696e732f78",
+     "level": 2,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/luma/titles",
+     "path_hex": "2f6c756d612f7469746c6573",
+     "level": 2,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/luma/config.ini",
+     "path_hex": "2f6c756d612f636f6e6669672e696e69",
+     "level": 2,
+     "expect": 4
+    },
+    {
+     "op": "set",
+     "path": "/luma/config.ini",
+     "path_hex": "2f6c756d612f636f6e6669672e696e69",
+     "level": 1,
+     "expect": 0
+    },
+    {
+     "op": "next",
+     "path": "/luma",
+     "path_hex": "2f6c756d61",
+     "level": 0,
+     "expect": 1
+    },
+    {
+     "op": "next",
+     "path": "/luma/payloads",
+     "path_hex": "2f6c756d612f7061796c6f616473",
+     "level": 0,
+     "expect": 1
+    },
+    {
+     "op": "next",
+     "path": "/luma/plugins/y",
+     "path_hex": "2f6c756d612f706c7567696e732f79",
+     "level": 0,
+     "expect": 0
+    },
+    {
+     "op": "next",
+     "path": "/luma/plugins",
+     "path_hex": "2f6c756d612f706c7567696e73",
+     "level": 0,
+     "expect": 0
+    },
+    {
+     "op": "next",
+     "path": "/luma/titles",
+     "path_hex": "2f6c756d612f7469746c6573",
+     "level": 0,
+     "expect": 0
+    }
+   ],
+   "read_roots": [
+    "/3ds/nintendo-dev-agent",
+    "/luma/plugins",
+    "/luma/plugins/x",
+    "/luma/titles",
+    "/luma/config.ini"
+   ],
+   "write_roots": [
+    "/3ds/nintendo-dev-agent",
+    "/luma/plugins",
+    "/luma/plugins/x",
+    "/luma/titles"
+   ],
+   "file_hex": "4e44504101040000020d2f6c756d612f706c7567696e73020f2f6c756d612f706c7567696e732f78020c2f6c756d612f7469746c657301102f6c756d612f636f6e6669672e696e69f9e15c1a01de650819953bbb5454bb3623296250a52572f6f20efaadac9ad5e7",
+   "entries": [
+    [
+     "/luma/plugins",
+     2
+    ],
+    [
+     "/luma/plugins/x",
+     2
+    ],
+    [
+     "/luma/titles",
+     2
+    ],
+    [
+     "/luma/config.ini",
+     1
     ]
    ]
   },

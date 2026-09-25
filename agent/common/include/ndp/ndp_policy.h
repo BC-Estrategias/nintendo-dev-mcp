@@ -20,6 +20,7 @@ typedef struct {
   ndp_pathlist write_roots;
   ndp_pathlist never_read;
   ndp_pathlist never_write;
+  ndp_pathlist write_except; /* folders inside a never_write zone that ARE writable (spec §11) */
 } ndp_policy;
 
 /* Normalizes and appends `path`. Returns NDP_OK, NDP_ST_PATH_INVALID or NDP_ST_TOO_LARGE. */
@@ -28,8 +29,13 @@ int ndp_pathlist_add(ndp_pathlist *l, const char *path);
 /* Spec §10 defaults: read "/", write "/3ds/nintendo-dev-agent", plus the never_* zones. */
 void ndp_policy_init_default(ndp_policy *p);
 
-/* The built-in protected zones (the never_* defaults), without building a whole policy on the stack. */
-int ndp_policy_default_zones(int write, const char *const **list);
+/* The built-in protected zones, without building a whole policy on the stack: `which` 0 = never_read,
+ * 1 = never_write, 2 = write_except. Returns the number of entries. */
+int ndp_policy_default_zones(int which, const char *const **list);
+
+/* Spec §11: is `norm` write-protected? It is when it lies inside a zone Z with no exception E such that `norm` is
+ * inside E and E is a PROPER sub-folder of Z. (A deeper zone inside an exception protects again.) */
+int ndp_write_protected(const char *const *zones, int nz, const char *const *exc, int ne, const char *norm);
 
 /* Returns NDP_OK, NDP_ST_PATH_INVALID, NDP_ST_FORBIDDEN_MODE or NDP_ST_PROTECTED_PATH.
  * When `norm_out` is not NULL (NDP_PATH_MAX + 1 bytes) it receives the normalized path on success. */
