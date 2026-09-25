@@ -13,7 +13,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "access_ui.h"
 #include "alog.h"
+#include "ndp/ndp_access_file.h"
 #include "ndp/ndp_keystore_file.h"
 #include "ndp/ndp_posix_fs.h"
 #include "ndp/ndp_server.h"
@@ -34,6 +36,7 @@
 #define AGENT_DIR "sdmc:/3ds/nintendo-dev-agent"
 #define CONFIG_DIR AGENT_DIR "/config"
 #define KEYS_FILE CONFIG_DIR "/pairing.bin"
+#define ACCESS_FILE CONFIG_DIR "/access.bin"
 #define PAIRING_WINDOW_MS 120000u
 #define FORGET_CONFIRM_MS 5000u
 #define SOC_ALIGN 0x1000
@@ -182,6 +185,7 @@ static int random_bytes(void *ctx, uint8_t *out, size_t n) {
 
 static void draw(uint64_t now);
 static ndp_keystore g_keys;
+static ndp_access g_access; /* the folders the owner opened (edited on the console, never over the network) */
 static bool g_keys_dirty_warn = false;     /* the last save failed */
 static uint64_t g_forget_armed_until = 0;  /* SELECT pressed once: a second press before this time forgets everything */
 
@@ -193,6 +197,17 @@ static void keys_changed(void *ctx, const ndp_keystore *keys) {
   rc = ndp_keystore_save_file(keys, KEYS_FILE);
   g_keys_dirty_warn = rc != 0;
   if (rc != 0) alog("ERR: cannot save pairing keys (%d): pairing will be lost when the agent exits", rc);
+}
+
+/* Applies the owner's list as the access policy and saves it. Called by the folder editor after each change. */
+static int access_changed(const ndp_access *list) {
+  ndp_policy pol;
+  int rc;
+  ndp_access_to_policy(list, &pol);
+  ndp_server_set_policy(&g_srv, &pol);
+  rc = ndp_access_save_file(list, ACCESS_FILE);
+  if (rc != 0) alog("ERR: cannot save the folder list (%d): it will be lost when the agent exits", rc);
+  return rc;
 }
 
 /* Opens the pairing window: the console generates the code and shows it on the TOP screen only —
@@ -372,6 +387,16 @@ static void draw(uint64_t now) {
   if (g_srv.agent_cfg.mode == NDP_MODE_READ_ONLY) printf("Mode   : " C_GREEN "READ_ONLY" C_RESET " (no writes)\n");
   else printf("Mode   : " C_YELLOW "%s" C_RESET " (writes on)\n", ndp_mode_name(g_srv.agent_cfg.mode));
   printf("Write  : /3ds/nintendo-dev-agent\n");
+  {
+    int reads = g_access.count, writes = 0, i;
+    bool whole = false;
+    for (i = 0; i < g_access.count; i++) {
+      if (g_access.e[i].level == NDP_LVL_WRITE) writes++;
+      if (strcmp(g_access.e[i].path, "/") == 0) whole = true;
+    }
+    if (whole) printf("Open   : " C_RED "WHOLE SD CARD" C_RESET " (read%s)\n", writes ? "+write" : "");
+    else printf("Open   : agent folder + %d more (%d writable)\n", reads, writes);
+  }
   if (!AGENT_AUTH_REQUIRED) printf("Auth   : " C_RED "NONE" C_RESET " (test build)\n");
   else printf("Auth   : required - %d paired\n", g_srv.keys.count);
   hms(up, sizeof up, now - g_start_ms);
@@ -392,7 +417,7 @@ static void draw(uint64_t now) {
       printf("\n\n\n");
     }
   }
-  printf("\nY = pair   SELECT x2 = forget   X = mode\nSTART = Exit\n");
+  printf("\nA = folders   Y = pair   X = mode\nSELECT x2 = forget pairings   START = Exit\n");
 
   consoleSelect(&g_bot);
   consoleClear();
@@ -462,17 +487,23 @@ int main(void) {
   plat.keys_changed = keys_changed;
   ndp_server_init(&g_srv, &plat, &cfg);
 
-  if (AGENT_AUTH_REQUIRED) {
+  {
     struct stat sb;
-    int lr;
-    /* The config folder must exist before the first pairing is saved. Creating a folder on the 3DS SD
-     * takes ~6 s (measured), so it is done here, once, and not while a computer waits for PAIR. */
+    int ar;
+    /* The config folder must exist before anything is saved. Creating a folder on the 3DS SD takes ~6 s
+     * (measured), so it is done here, once, and not while a computer waits for a reply. */
     if (stat(CONFIG_DIR, &sb) != 0) {
       alog("Creating %s (one time, ~6 s)...", CONFIG_DIR);
       draw(now_ms(NULL));
       if (mkdir(CONFIG_DIR, 0777) != 0) alog("ERR: cannot create the config folder");
     }
-    lr = ndp_keystore_load_file(&g_keys, KEYS_FILE);
+    ar = ndp_access_load_file(&g_access, ACCESS_FILE);
+    if (ar < 0) alog("WARN: folder list is corrupt: ignored (only the agent's folder is open)");
+    else if (ar == 0) alog("Loaded %d opened folder(s)", g_access.count);
+    { ndp_policy pol; ndp_access_to_policy(&g_access, &pol); ndp_server_set_policy(&g_srv, &pol); }
+  }
+  if (AGENT_AUTH_REQUIRED) {
+    int lr = ndp_keystore_load_file(&g_keys, KEYS_FILE);
     if (lr < 0) alog("WARN: pairing file is corrupt: ignored (no computer is paired)");
     else if (lr == 0) alog("Loaded %d paired computer(s)", g_keys.count);
     if (!g_keys.has_device_id && random_bytes(NULL, g_keys.device_id, sizeof g_keys.device_id) == 0) {
@@ -487,12 +518,19 @@ int main(void) {
     uint64_t now;
     bool changed;
     hidScanInput();
-    if (hidKeysDown() & KEY_START) break;
-    if (AGENT_AUTH_REQUIRED && (hidKeysDown() & KEY_Y)) {
+    if (access_ui_active()) {
+      /* the folder editor owns the buttons while it is open (START closes it, it does not quit the agent) */
+      if (access_ui_handle(hidKeysDown())) draw_pending = true;
+    } else if (hidKeysDown() & KEY_START) break;
+    else if (hidKeysDown() & KEY_A) {
+      access_ui_open(&g_access, access_changed);
+      draw_pending = true;
+    }
+    if (!access_ui_active() && AGENT_AUTH_REQUIRED && (hidKeysDown() & KEY_Y)) {
       open_pairing();
       draw_pending = true;
     }
-    if (AGENT_AUTH_REQUIRED && (hidKeysDown() & KEY_SELECT)) {
+    if (!access_ui_active() && AGENT_AUTH_REQUIRED && (hidKeysDown() & KEY_SELECT)) {
       uint64_t t = now_ms(NULL);
       if (g_forget_armed_until > t) {
         ndp_server_clear_keys(&g_srv);
@@ -502,7 +540,7 @@ int main(void) {
       }
       draw_pending = true;
     }
-    if (hidKeysDown() & KEY_X) {
+    if (!access_ui_active() && (hidKeysDown() & KEY_X)) {
       ndp_mode next = g_srv.agent_cfg.mode == NDP_MODE_READ_ONLY ? NDP_MODE_DEVELOPMENT : NDP_MODE_READ_ONLY;
       ndp_server_set_mode(&g_srv, next);
       alog("Mode -> %s", ndp_mode_name(next));
@@ -537,7 +575,8 @@ int main(void) {
     if (changed || alog_dirty()) draw_pending = true;
     if ((draw_pending && now - last_draw >= DRAW_MIN_MS) || now - last_draw >= DRAW_MAX_MS) {
       alog_clear_dirty();
-      draw(now);
+      if (access_ui_active()) access_ui_draw(&g_top, &g_bot);
+      else draw(now);
       draw_pending = false;
       last_draw = now;
     }

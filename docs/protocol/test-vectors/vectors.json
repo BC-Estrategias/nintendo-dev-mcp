@@ -532,6 +532,37 @@
     "/3ds/nintendo-dev-agent/config"
    ]
   },
+  "narrow": {
+   "read_roots": [
+    "/roms/gba",
+    "/3ds/nintendo-dev-agent"
+   ],
+   "write_roots": [
+    "/3ds/nintendo-dev-agent"
+   ],
+   "never_read": [
+    "/3ds/nintendo-dev-agent/config"
+   ],
+   "never_write": [
+    "/Nintendo 3DS",
+    "/luma",
+    "/boot.firm",
+    "/gm9",
+    "/private",
+    "/3ds/nintendo-dev-agent/config"
+   ]
+  },
+  "hidden": {
+   "read_roots": [
+    "/a/b/c",
+    "/ok"
+   ],
+   "write_roots": [],
+   "never_read": [
+    "/a/b"
+   ],
+   "never_write": []
+  },
   "wide": {
    "read_roots": [
     "/"
@@ -824,6 +855,965 @@
    "path_hex": "2f4e696e74656e646f203344532f78",
    "status": "OK",
    "status_code": 0
+  }
+ ],
+ "traverse": [
+  {
+   "config": "default",
+   "path": "/",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/roms",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/roms/gba",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/roms/gba/game.gba",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/roms/nds",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/romsx",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/ROMS",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/3ds",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/3DS",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/3ds/nintendo-dev-agent",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/3ds/nintendo-dev-agent/config",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "default",
+   "path": "/3ds/nintendo-dev-agent/config/k",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "default",
+   "path": "/3ds/other",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/luma",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/cias",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/Nintendo 3DS",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/a",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/a/b",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/a/b/c",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "default",
+   "path": "/ok",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/",
+   "traversable": true,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/roms",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/roms/gba",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/roms/gba/game.gba",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/roms/nds",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/romsx",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "custom",
+   "path": "/ROMS",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/3ds",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/3DS",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/3ds/nintendo-dev-agent",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/3ds/nintendo-dev-agent/config",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "custom",
+   "path": "/3ds/nintendo-dev-agent/config/k",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "custom",
+   "path": "/3ds/other",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "custom",
+   "path": "/luma",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "custom",
+   "path": "/cias",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "custom",
+   "path": "/Nintendo 3DS",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "custom",
+   "path": "/a",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "custom",
+   "path": "/a/b",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "custom",
+   "path": "/a/b/c",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "custom",
+   "path": "/ok",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/",
+   "traversable": true,
+   "visible": true
+  },
+  {
+   "config": "narrow",
+   "path": "/roms",
+   "traversable": true,
+   "visible": true
+  },
+  {
+   "config": "narrow",
+   "path": "/roms/gba",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "narrow",
+   "path": "/roms/gba/game.gba",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "narrow",
+   "path": "/roms/nds",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/romsx",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/ROMS",
+   "traversable": true,
+   "visible": true
+  },
+  {
+   "config": "narrow",
+   "path": "/3ds",
+   "traversable": true,
+   "visible": true
+  },
+  {
+   "config": "narrow",
+   "path": "/3DS",
+   "traversable": true,
+   "visible": true
+  },
+  {
+   "config": "narrow",
+   "path": "/3ds/nintendo-dev-agent",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "narrow",
+   "path": "/3ds/nintendo-dev-agent/config",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/3ds/nintendo-dev-agent/config/k",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/3ds/other",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/luma",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/cias",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/Nintendo 3DS",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/a",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/a/b",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/a/b/c",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "narrow",
+   "path": "/ok",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/",
+   "traversable": true,
+   "visible": true
+  },
+  {
+   "config": "hidden",
+   "path": "/roms",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/roms/gba",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/roms/gba/game.gba",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/roms/nds",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/romsx",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/ROMS",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/3ds",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/3DS",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/3ds/nintendo-dev-agent",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/3ds/nintendo-dev-agent/config",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/3ds/nintendo-dev-agent/config/k",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/3ds/other",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/luma",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/cias",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/Nintendo 3DS",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/a",
+   "traversable": true,
+   "visible": true
+  },
+  {
+   "config": "hidden",
+   "path": "/a/b",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/a/b/c",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "hidden",
+   "path": "/ok",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/roms",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/roms/gba",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/roms/gba/game.gba",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/roms/nds",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/romsx",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/ROMS",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/3ds",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/3DS",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/3ds/nintendo-dev-agent",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/3ds/nintendo-dev-agent/config",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "wide",
+   "path": "/3ds/nintendo-dev-agent/config/k",
+   "traversable": false,
+   "visible": false
+  },
+  {
+   "config": "wide",
+   "path": "/3ds/other",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/luma",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/cias",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/Nintendo 3DS",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/a",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/a/b",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/a/b/c",
+   "traversable": false,
+   "visible": true
+  },
+  {
+   "config": "wide",
+   "path": "/ok",
+   "traversable": false,
+   "visible": true
+  }
+ ],
+ "access": [
+  {
+   "name": "basic",
+   "ops": [
+    {
+     "op": "set",
+     "path": "/roms",
+     "path_hex": "2f726f6d73",
+     "level": 1,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/roms/gba",
+     "path_hex": "2f726f6d732f676261",
+     "level": 2,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/luma",
+     "path_hex": "2f6c756d61",
+     "level": 1,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/luma",
+     "path_hex": "2f6c756d61",
+     "level": 2,
+     "expect": 4
+    },
+    {
+     "op": "set",
+     "path": "/3ds/nintendo-dev-agent/config",
+     "path_hex": "2f3364732f6e696e74656e646f2d6465762d6167656e742f636f6e666967",
+     "level": 1,
+     "expect": 4
+    },
+    {
+     "op": "set",
+     "path": "relative",
+     "path_hex": "72656c6174697665",
+     "level": 1,
+     "expect": 17
+    },
+    {
+     "op": "set",
+     "path": "/a/../b",
+     "path_hex": "2f612f2e2e2f62",
+     "level": 1,
+     "expect": 17
+    },
+    {
+     "op": "next",
+     "path": "/roms",
+     "path_hex": "2f726f6d73",
+     "level": 0,
+     "expect": 2
+    },
+    {
+     "op": "next",
+     "path": "/roms/gba",
+     "path_hex": "2f726f6d732f676261",
+     "level": 0,
+     "expect": 0
+    },
+    {
+     "op": "next",
+     "path": "/roms/nds",
+     "path_hex": "2f726f6d732f6e6473",
+     "level": 0,
+     "expect": 2
+    },
+    {
+     "op": "next",
+     "path": "/x",
+     "path_hex": "2f78",
+     "level": 0,
+     "expect": 1
+    },
+    {
+     "op": "next",
+     "path": "/3ds/nintendo-dev-agent/inbox",
+     "path_hex": "2f3364732f6e696e74656e646f2d6465762d6167656e742f696e626f78",
+     "level": 0,
+     "expect": 0
+    },
+    {
+     "op": "next",
+     "path": "/Nintendo 3DS",
+     "path_hex": "2f4e696e74656e646f20334453",
+     "level": 0,
+     "expect": 1
+    },
+    {
+     "op": "next",
+     "path": "/luma/x",
+     "path_hex": "2f6c756d612f78",
+     "level": 0,
+     "expect": 0
+    },
+    {
+     "op": "next",
+     "path": "/3ds/nintendo-dev-agent/config",
+     "path_hex": "2f3364732f6e696e74656e646f2d6465762d6167656e742f636f6e666967",
+     "level": 0,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/ROMS",
+     "path_hex": "2f524f4d53",
+     "level": 2,
+     "expect": 0
+    },
+    {
+     "op": "next",
+     "path": "/roms",
+     "path_hex": "2f726f6d73",
+     "level": 0,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/roms",
+     "path_hex": "2f726f6d73",
+     "level": 0,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/nonexistent",
+     "path_hex": "2f6e6f6e6578697374656e74",
+     "level": 0,
+     "expect": 0
+    },
+    {
+     "op": "next",
+     "path": "/roms/gba",
+     "path_hex": "2f726f6d732f676261",
+     "level": 0,
+     "expect": 0
+    }
+   ],
+   "read_roots": [
+    "/3ds/nintendo-dev-agent",
+    "/roms/gba",
+    "/luma"
+   ],
+   "write_roots": [
+    "/3ds/nintendo-dev-agent",
+    "/roms/gba"
+   ],
+   "file_hex": "4e4450410102000002092f726f6d732f67626101052f6c756d614a94d979b1f56801931417ecc6154b7d6121f02deef2c59b7f92ea45f8f17d3c",
+   "entries": [
+    [
+     "/roms/gba",
+     2
+    ],
+    [
+     "/luma",
+     1
+    ]
+   ]
+  },
+  {
+   "name": "full_list",
+   "ops": [
+    {
+     "op": "set",
+     "path": "/a",
+     "path_hex": "2f61",
+     "level": 1,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/b",
+     "path_hex": "2f62",
+     "level": 2,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/c",
+     "path_hex": "2f63",
+     "level": 1,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/d",
+     "path_hex": "2f64",
+     "level": 1,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/e",
+     "path_hex": "2f65",
+     "level": 2,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/f",
+     "path_hex": "2f66",
+     "level": 1,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/g",
+     "path_hex": "2f67",
+     "level": 1,
+     "expect": 8
+    },
+    {
+     "op": "set",
+     "path": "/a",
+     "path_hex": "2f61",
+     "level": 2,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/b",
+     "path_hex": "2f62",
+     "level": 0,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/g",
+     "path_hex": "2f67",
+     "level": 1,
+     "expect": 0
+    }
+   ],
+   "read_roots": [
+    "/3ds/nintendo-dev-agent",
+    "/a",
+    "/c",
+    "/d",
+    "/e",
+    "/f",
+    "/g"
+   ],
+   "write_roots": [
+    "/3ds/nintendo-dev-agent",
+    "/a",
+    "/e"
+   ],
+   "file_hex": "4e4450410106000002022f6101022f6301022f6402022f6501022f6601022f6744e11c9aaea2a97fd4170bf2626f962b43e6ddc0465aa75c85b93aa809cbec70",
+   "entries": [
+    [
+     "/a",
+     2
+    ],
+    [
+     "/c",
+     1
+    ],
+    [
+     "/d",
+     1
+    ],
+    [
+     "/e",
+     2
+    ],
+    [
+     "/f",
+     1
+    ],
+    [
+     "/g",
+     1
+    ]
+   ]
+  },
+  {
+   "name": "whole_card",
+   "ops": [
+    {
+     "op": "set",
+     "path": "/",
+     "path_hex": "2f",
+     "level": 1,
+     "expect": 0
+    },
+    {
+     "op": "next",
+     "path": "/",
+     "path_hex": "2f",
+     "level": 0,
+     "expect": 2
+    },
+    {
+     "op": "next",
+     "path": "/roms",
+     "path_hex": "2f726f6d73",
+     "level": 0,
+     "expect": 2
+    },
+    {
+     "op": "set",
+     "path": "/",
+     "path_hex": "2f",
+     "level": 2,
+     "expect": 0
+    },
+    {
+     "op": "set",
+     "path": "/Nintendo 3DS",
+     "path_hex": "2f4e696e74656e646f20334453",
+     "level": 2,
+     "expect": 4
+    },
+    {
+     "op": "next",
+     "path": "/",
+     "path_hex": "2f",
+     "level": 0,
+     "expect": 0
+    }
+   ],
+   "read_roots": [
+    "/3ds/nintendo-dev-agent",
+    "/"
+   ],
+   "write_roots": [
+    "/3ds/nintendo-dev-agent",
+    "/"
+   ],
+   "file_hex": "4e4450410101000002012fe21206ec1d449afeeb00116be7a5c41e430b9c0d0d4abfe44445baccfeb16385",
+   "entries": [
+    [
+     "/",
+     2
+    ]
+   ]
+  },
+  {
+   "name": "empty",
+   "ops": [],
+   "read_roots": [
+    "/3ds/nintendo-dev-agent"
+   ],
+   "write_roots": [
+    "/3ds/nintendo-dev-agent"
+   ],
+   "file_hex": "4e4450410100000082fdcce71f7ff4bbe0a983296277ce67d2bfc6f6624c9c54a8b2121aae148fc8",
+   "entries": []
   }
  ],
  "agent_config": {

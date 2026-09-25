@@ -223,6 +223,8 @@ typedef struct { const char *read_roots[8]; const char *write_roots[8]; const ch
 static const v_cfg_t v_cfgs[] = {
   {{"/", NULL}, {"/3ds/nintendo-dev-agent", NULL}, {"/3ds/nintendo-dev-agent/config", NULL}, {"/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private", "/3ds/nintendo-dev-agent/config", NULL}}, /* default */
   {{"/roms", "/3ds", NULL}, {"/roms", "/3ds/tmc3ds", "/cias", NULL}, {"/3ds/nintendo-dev-agent/config", NULL}, {"/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private", "/3ds/nintendo-dev-agent/config", NULL}}, /* custom */
+  {{"/roms/gba", "/3ds/nintendo-dev-agent", NULL}, {"/3ds/nintendo-dev-agent", NULL}, {"/3ds/nintendo-dev-agent/config", NULL}, {"/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private", "/3ds/nintendo-dev-agent/config", NULL}}, /* narrow */
+  {{"/a/b/c", "/ok", NULL}, {NULL}, {"/a/b", NULL}, {NULL}}, /* hidden */
   {{"/", NULL}, {"/", NULL}, {"/3ds/nintendo-dev-agent/config", NULL}, {"/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private", "/3ds/nintendo-dev-agent/config", NULL}}, /* wide */
 };
 static const uint8_t v_po_path_0[] = {0x2f};
@@ -288,15 +290,215 @@ static const v_policy_t v_policies[] = {
   {1, 1, 0, v_po_path_24, 12, 0},
   {1, 1, 0, v_po_path_25, 11, 4},
   {1, 1, 0, v_po_path_26, 5, 0},
-  {2, 1, 1, v_po_path_27, 11, 0},
-  {2, 1, 1, v_po_path_28, 7, 4},
-  {2, 1, 1, v_po_path_29, 19, 4},
-  {2, 2, 1, v_po_path_30, 10, 4},
-  {2, 1, 1, v_po_path_31, 30, 4},
-  {2, 1, 0, v_po_path_32, 30, 4},
-  {2, 0, 0, v_po_path_33, 15, 0},
+  {4, 1, 1, v_po_path_27, 11, 0},
+  {4, 1, 1, v_po_path_28, 7, 4},
+  {4, 1, 1, v_po_path_29, 19, 4},
+  {4, 2, 1, v_po_path_30, 10, 4},
+  {4, 1, 1, v_po_path_31, 30, 4},
+  {4, 1, 0, v_po_path_32, 30, 4},
+  {4, 0, 0, v_po_path_33, 15, 0},
 };
 #define V_POLICY_N 34
+
+typedef struct { int cfg; const char *path; int traversable; int visible; } v_trav_t;
+static const v_trav_t v_travs[] = {
+  {0, "/", 0, 1},
+  {0, "/roms", 0, 1},
+  {0, "/roms/gba", 0, 1},
+  {0, "/roms/gba/game.gba", 0, 1},
+  {0, "/roms/nds", 0, 1},
+  {0, "/romsx", 0, 1},
+  {0, "/ROMS", 0, 1},
+  {0, "/3ds", 0, 1},
+  {0, "/3DS", 0, 1},
+  {0, "/3ds/nintendo-dev-agent", 0, 1},
+  {0, "/3ds/nintendo-dev-agent/config", 0, 0},
+  {0, "/3ds/nintendo-dev-agent/config/k", 0, 0},
+  {0, "/3ds/other", 0, 1},
+  {0, "/luma", 0, 1},
+  {0, "/cias", 0, 1},
+  {0, "/Nintendo 3DS", 0, 1},
+  {0, "/a", 0, 1},
+  {0, "/a/b", 0, 1},
+  {0, "/a/b/c", 0, 1},
+  {0, "/ok", 0, 1},
+  {1, "/", 1, 1},
+  {1, "/roms", 0, 1},
+  {1, "/roms/gba", 0, 1},
+  {1, "/roms/gba/game.gba", 0, 1},
+  {1, "/roms/nds", 0, 1},
+  {1, "/romsx", 0, 0},
+  {1, "/ROMS", 0, 1},
+  {1, "/3ds", 0, 1},
+  {1, "/3DS", 0, 1},
+  {1, "/3ds/nintendo-dev-agent", 0, 1},
+  {1, "/3ds/nintendo-dev-agent/config", 0, 0},
+  {1, "/3ds/nintendo-dev-agent/config/k", 0, 0},
+  {1, "/3ds/other", 0, 1},
+  {1, "/luma", 0, 0},
+  {1, "/cias", 0, 0},
+  {1, "/Nintendo 3DS", 0, 0},
+  {1, "/a", 0, 0},
+  {1, "/a/b", 0, 0},
+  {1, "/a/b/c", 0, 0},
+  {1, "/ok", 0, 0},
+  {2, "/", 1, 1},
+  {2, "/roms", 1, 1},
+  {2, "/roms/gba", 0, 1},
+  {2, "/roms/gba/game.gba", 0, 1},
+  {2, "/roms/nds", 0, 0},
+  {2, "/romsx", 0, 0},
+  {2, "/ROMS", 1, 1},
+  {2, "/3ds", 1, 1},
+  {2, "/3DS", 1, 1},
+  {2, "/3ds/nintendo-dev-agent", 0, 1},
+  {2, "/3ds/nintendo-dev-agent/config", 0, 0},
+  {2, "/3ds/nintendo-dev-agent/config/k", 0, 0},
+  {2, "/3ds/other", 0, 0},
+  {2, "/luma", 0, 0},
+  {2, "/cias", 0, 0},
+  {2, "/Nintendo 3DS", 0, 0},
+  {2, "/a", 0, 0},
+  {2, "/a/b", 0, 0},
+  {2, "/a/b/c", 0, 0},
+  {2, "/ok", 0, 0},
+  {3, "/", 1, 1},
+  {3, "/roms", 0, 0},
+  {3, "/roms/gba", 0, 0},
+  {3, "/roms/gba/game.gba", 0, 0},
+  {3, "/roms/nds", 0, 0},
+  {3, "/romsx", 0, 0},
+  {3, "/ROMS", 0, 0},
+  {3, "/3ds", 0, 0},
+  {3, "/3DS", 0, 0},
+  {3, "/3ds/nintendo-dev-agent", 0, 0},
+  {3, "/3ds/nintendo-dev-agent/config", 0, 0},
+  {3, "/3ds/nintendo-dev-agent/config/k", 0, 0},
+  {3, "/3ds/other", 0, 0},
+  {3, "/luma", 0, 0},
+  {3, "/cias", 0, 0},
+  {3, "/Nintendo 3DS", 0, 0},
+  {3, "/a", 1, 1},
+  {3, "/a/b", 0, 0},
+  {3, "/a/b/c", 0, 0},
+  {3, "/ok", 0, 1},
+  {4, "/", 0, 1},
+  {4, "/roms", 0, 1},
+  {4, "/roms/gba", 0, 1},
+  {4, "/roms/gba/game.gba", 0, 1},
+  {4, "/roms/nds", 0, 1},
+  {4, "/romsx", 0, 1},
+  {4, "/ROMS", 0, 1},
+  {4, "/3ds", 0, 1},
+  {4, "/3DS", 0, 1},
+  {4, "/3ds/nintendo-dev-agent", 0, 1},
+  {4, "/3ds/nintendo-dev-agent/config", 0, 0},
+  {4, "/3ds/nintendo-dev-agent/config/k", 0, 0},
+  {4, "/3ds/other", 0, 1},
+  {4, "/luma", 0, 1},
+  {4, "/cias", 0, 1},
+  {4, "/Nintendo 3DS", 0, 1},
+  {4, "/a", 0, 1},
+  {4, "/a/b", 0, 1},
+  {4, "/a/b/c", 0, 1},
+  {4, "/ok", 0, 1},
+};
+#define V_TRAV_N 100
+
+typedef struct { int is_next; const uint8_t *path; size_t path_len; int level; int expect; } v_aop_t;
+typedef struct { const char *name; const v_aop_t *ops; int n; const char *read_roots[8]; const char *write_roots[8]; const uint8_t *file; size_t file_len; } v_access_t;
+static const uint8_t v_ac_p_0_0[] = {0x2f, 0x72, 0x6f, 0x6d, 0x73};
+static const uint8_t v_ac_p_0_1[] = {0x2f, 0x72, 0x6f, 0x6d, 0x73, 0x2f, 0x67, 0x62, 0x61};
+static const uint8_t v_ac_p_0_2[] = {0x2f, 0x6c, 0x75, 0x6d, 0x61};
+static const uint8_t v_ac_p_0_3[] = {0x2f, 0x6c, 0x75, 0x6d, 0x61};
+static const uint8_t v_ac_p_0_4[] = {0x2f, 0x33, 0x64, 0x73, 0x2f, 0x6e, 0x69, 0x6e, 0x74, 0x65, 0x6e, 0x64, 0x6f, 0x2d, 0x64, 0x65, 0x76, 0x2d, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67};
+static const uint8_t v_ac_p_0_5[] = {0x72, 0x65, 0x6c, 0x61, 0x74, 0x69, 0x76, 0x65};
+static const uint8_t v_ac_p_0_6[] = {0x2f, 0x61, 0x2f, 0x2e, 0x2e, 0x2f, 0x62};
+static const uint8_t v_ac_p_0_7[] = {0x2f, 0x72, 0x6f, 0x6d, 0x73};
+static const uint8_t v_ac_p_0_8[] = {0x2f, 0x72, 0x6f, 0x6d, 0x73, 0x2f, 0x67, 0x62, 0x61};
+static const uint8_t v_ac_p_0_9[] = {0x2f, 0x72, 0x6f, 0x6d, 0x73, 0x2f, 0x6e, 0x64, 0x73};
+static const uint8_t v_ac_p_0_10[] = {0x2f, 0x78};
+static const uint8_t v_ac_p_0_11[] = {0x2f, 0x33, 0x64, 0x73, 0x2f, 0x6e, 0x69, 0x6e, 0x74, 0x65, 0x6e, 0x64, 0x6f, 0x2d, 0x64, 0x65, 0x76, 0x2d, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2f, 0x69, 0x6e, 0x62, 0x6f, 0x78};
+static const uint8_t v_ac_p_0_12[] = {0x2f, 0x4e, 0x69, 0x6e, 0x74, 0x65, 0x6e, 0x64, 0x6f, 0x20, 0x33, 0x44, 0x53};
+static const uint8_t v_ac_p_0_13[] = {0x2f, 0x6c, 0x75, 0x6d, 0x61, 0x2f, 0x78};
+static const uint8_t v_ac_p_0_14[] = {0x2f, 0x33, 0x64, 0x73, 0x2f, 0x6e, 0x69, 0x6e, 0x74, 0x65, 0x6e, 0x64, 0x6f, 0x2d, 0x64, 0x65, 0x76, 0x2d, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67};
+static const uint8_t v_ac_p_0_15[] = {0x2f, 0x52, 0x4f, 0x4d, 0x53};
+static const uint8_t v_ac_p_0_16[] = {0x2f, 0x72, 0x6f, 0x6d, 0x73};
+static const uint8_t v_ac_p_0_17[] = {0x2f, 0x72, 0x6f, 0x6d, 0x73};
+static const uint8_t v_ac_p_0_18[] = {0x2f, 0x6e, 0x6f, 0x6e, 0x65, 0x78, 0x69, 0x73, 0x74, 0x65, 0x6e, 0x74};
+static const uint8_t v_ac_p_0_19[] = {0x2f, 0x72, 0x6f, 0x6d, 0x73, 0x2f, 0x67, 0x62, 0x61};
+static const uint8_t v_ac_file_0[] = {0x4e, 0x44, 0x50, 0x41, 0x01, 0x02, 0x00, 0x00, 0x02, 0x09, 0x2f, 0x72, 0x6f, 0x6d, 0x73, 0x2f, 0x67, 0x62, 0x61, 0x01, 0x05, 0x2f, 0x6c, 0x75, 0x6d, 0x61, 0x4a, 0x94, 0xd9, 0x79, 0xb1, 0xf5, 0x68, 0x01, 0x93, 0x14, 0x17, 0xec, 0xc6, 0x15, 0x4b, 0x7d, 0x61, 0x21, 0xf0, 0x2d, 0xee, 0xf2, 0xc5, 0x9b, 0x7f, 0x92, 0xea, 0x45, 0xf8, 0xf1, 0x7d, 0x3c};
+static const v_aop_t v_ac_ops_0[] = {
+  {0, v_ac_p_0_0, 5, 1, 0},
+  {0, v_ac_p_0_1, 9, 2, 0},
+  {0, v_ac_p_0_2, 5, 1, 0},
+  {0, v_ac_p_0_3, 5, 2, 4},
+  {0, v_ac_p_0_4, 30, 1, 4},
+  {0, v_ac_p_0_5, 8, 1, 17},
+  {0, v_ac_p_0_6, 7, 1, 17},
+  {1, v_ac_p_0_7, 5, 0, 2},
+  {1, v_ac_p_0_8, 9, 0, 0},
+  {1, v_ac_p_0_9, 9, 0, 2},
+  {1, v_ac_p_0_10, 2, 0, 1},
+  {1, v_ac_p_0_11, 29, 0, 0},
+  {1, v_ac_p_0_12, 13, 0, 1},
+  {1, v_ac_p_0_13, 7, 0, 0},
+  {1, v_ac_p_0_14, 30, 0, 0},
+  {0, v_ac_p_0_15, 5, 2, 0},
+  {1, v_ac_p_0_16, 5, 0, 0},
+  {0, v_ac_p_0_17, 5, 0, 0},
+  {0, v_ac_p_0_18, 12, 0, 0},
+  {1, v_ac_p_0_19, 9, 0, 0},
+};
+static const uint8_t v_ac_p_1_0[] = {0x2f, 0x61};
+static const uint8_t v_ac_p_1_1[] = {0x2f, 0x62};
+static const uint8_t v_ac_p_1_2[] = {0x2f, 0x63};
+static const uint8_t v_ac_p_1_3[] = {0x2f, 0x64};
+static const uint8_t v_ac_p_1_4[] = {0x2f, 0x65};
+static const uint8_t v_ac_p_1_5[] = {0x2f, 0x66};
+static const uint8_t v_ac_p_1_6[] = {0x2f, 0x67};
+static const uint8_t v_ac_p_1_7[] = {0x2f, 0x61};
+static const uint8_t v_ac_p_1_8[] = {0x2f, 0x62};
+static const uint8_t v_ac_p_1_9[] = {0x2f, 0x67};
+static const uint8_t v_ac_file_1[] = {0x4e, 0x44, 0x50, 0x41, 0x01, 0x06, 0x00, 0x00, 0x02, 0x02, 0x2f, 0x61, 0x01, 0x02, 0x2f, 0x63, 0x01, 0x02, 0x2f, 0x64, 0x02, 0x02, 0x2f, 0x65, 0x01, 0x02, 0x2f, 0x66, 0x01, 0x02, 0x2f, 0x67, 0x44, 0xe1, 0x1c, 0x9a, 0xae, 0xa2, 0xa9, 0x7f, 0xd4, 0x17, 0x0b, 0xf2, 0x62, 0x6f, 0x96, 0x2b, 0x43, 0xe6, 0xdd, 0xc0, 0x46, 0x5a, 0xa7, 0x5c, 0x85, 0xb9, 0x3a, 0xa8, 0x09, 0xcb, 0xec, 0x70};
+static const v_aop_t v_ac_ops_1[] = {
+  {0, v_ac_p_1_0, 2, 1, 0},
+  {0, v_ac_p_1_1, 2, 2, 0},
+  {0, v_ac_p_1_2, 2, 1, 0},
+  {0, v_ac_p_1_3, 2, 1, 0},
+  {0, v_ac_p_1_4, 2, 2, 0},
+  {0, v_ac_p_1_5, 2, 1, 0},
+  {0, v_ac_p_1_6, 2, 1, 8},
+  {0, v_ac_p_1_7, 2, 2, 0},
+  {0, v_ac_p_1_8, 2, 0, 0},
+  {0, v_ac_p_1_9, 2, 1, 0},
+};
+static const uint8_t v_ac_p_2_0[] = {0x2f};
+static const uint8_t v_ac_p_2_1[] = {0x2f};
+static const uint8_t v_ac_p_2_2[] = {0x2f, 0x72, 0x6f, 0x6d, 0x73};
+static const uint8_t v_ac_p_2_3[] = {0x2f};
+static const uint8_t v_ac_p_2_4[] = {0x2f, 0x4e, 0x69, 0x6e, 0x74, 0x65, 0x6e, 0x64, 0x6f, 0x20, 0x33, 0x44, 0x53};
+static const uint8_t v_ac_p_2_5[] = {0x2f};
+static const uint8_t v_ac_file_2[] = {0x4e, 0x44, 0x50, 0x41, 0x01, 0x01, 0x00, 0x00, 0x02, 0x01, 0x2f, 0xe2, 0x12, 0x06, 0xec, 0x1d, 0x44, 0x9a, 0xfe, 0xeb, 0x00, 0x11, 0x6b, 0xe7, 0xa5, 0xc4, 0x1e, 0x43, 0x0b, 0x9c, 0x0d, 0x0d, 0x4a, 0xbf, 0xe4, 0x44, 0x45, 0xba, 0xcc, 0xfe, 0xb1, 0x63, 0x85};
+static const v_aop_t v_ac_ops_2[] = {
+  {0, v_ac_p_2_0, 1, 1, 0},
+  {1, v_ac_p_2_1, 1, 0, 2},
+  {1, v_ac_p_2_2, 5, 0, 2},
+  {0, v_ac_p_2_3, 1, 2, 0},
+  {0, v_ac_p_2_4, 13, 2, 4},
+  {1, v_ac_p_2_5, 1, 0, 0},
+};
+static const uint8_t v_ac_file_3[] = {0x4e, 0x44, 0x50, 0x41, 0x01, 0x00, 0x00, 0x00, 0x82, 0xfd, 0xcc, 0xe7, 0x1f, 0x7f, 0xf4, 0xbb, 0xe0, 0xa9, 0x83, 0x29, 0x62, 0x77, 0xce, 0x67, 0xd2, 0xbf, 0xc6, 0xf6, 0x62, 0x4c, 0x9c, 0x54, 0xa8, 0xb2, 0x12, 0x1a, 0xae, 0x14, 0x8f, 0xc8};
+static const v_aop_t v_ac_ops_3[] = {
+  {0, NULL, 0, 0, 0}
+};
+static const v_access_t v_accesses[] = {
+  {"basic", v_ac_ops_0, 20, {"/3ds/nintendo-dev-agent", "/roms/gba", "/luma", NULL}, {"/3ds/nintendo-dev-agent", "/roms/gba", NULL}, v_ac_file_0, 58},
+  {"full_list", v_ac_ops_1, 10, {"/3ds/nintendo-dev-agent", "/a", "/c", "/d", "/e", "/f", "/g", NULL}, {"/3ds/nintendo-dev-agent", "/a", "/e", NULL}, v_ac_file_1, 64},
+  {"whole_card", v_ac_ops_2, 6, {"/3ds/nintendo-dev-agent", "/", NULL}, {"/3ds/nintendo-dev-agent", "/", NULL}, v_ac_file_2, 43},
+  {"empty", v_ac_ops_3, 0, {"/3ds/nintendo-dev-agent", NULL}, {"/3ds/nintendo-dev-agent", NULL}, v_ac_file_3, 40},
+};
+#define V_ACCESS_N 4
 
 #define V_AGENT_PLATFORM "host"
 #define V_AGENT_VERSION "0.1.0"

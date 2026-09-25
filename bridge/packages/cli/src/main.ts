@@ -19,6 +19,8 @@ Usage:
   ndev unpair <host[:port]>                       forget this computer's key for that console
                                                   (to make the console forget ALL computers: its SELECT button)
   ndev pairings                                   list the consoles this computer is paired with
+  ndev access <host[:port]>                       the folders the console's owner opened (read / write);
+                                                  they are chosen on the console itself (A button)
   ndev hello <host[:port]>                        connect and print the agent's HELLO
   ndev ping  <host[:port]> [-c N] [-i MS]         HELLO + N pings (default 4), MS ms between pings
   ndev ls    <host[:port]> <path>                 list a directory on the device's SD card
@@ -171,9 +173,21 @@ async function main(argv: string[]): Promise<number> {
       client.close();
     }
   }
-  if (!["hello", "ping", "ls", "stat", "cat", "get", "put", "mkdir", "rm"].includes(cmd) || !target) {
+  if (!["hello", "ping", "access", "ls", "stat", "cat", "get", "put", "mkdir", "rm"].includes(cmd) || !target) {
     console.error(USAGE);
     return 2;
+  }
+
+  if (cmd === "access") {
+    return withClient(target, async (client) => {
+      const a = await client.accessInfo();
+      console.log(`mode ${a.mode}`);
+      console.log("readable folders (recursively):");
+      for (const r of a.readRoots) console.log(`  ${r}${a.writeRoots.includes(r) ? "   (also writable)" : ""}`);
+      console.log(a.mode === "READ_ONLY" ? "writable folders (writes are OFF: press X on the console):" : "writable folders:");
+      for (const r of a.writeRoots) console.log(`  ${r}`);
+      return 0;
+    });
   }
 
   if (cmd === "hello" || cmd === "ping") {

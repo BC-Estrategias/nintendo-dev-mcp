@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define NDP_AGENT_VERSION "0.5.0"
+#define NDP_AGENT_VERSION "0.6.0"
 #define NDP_PROTOCOL_VERSION 1
 #define NDP_HEADER_SIZE 20
 #define NDP_MAC_SIZE 16
@@ -30,6 +30,7 @@ enum ndp_command {
   NDP_CMD_PING = 0x0002,
   NDP_CMD_PAIR = 0x0004,
   NDP_CMD_AUTH = 0x0005,
+  NDP_CMD_ACCESS_INFO = 0x0011,
   NDP_CMD_FS_LIST = 0x0020,
   NDP_CMD_FS_STAT = 0x0021,
   NDP_CMD_FS_READ = 0x0022,
@@ -108,8 +109,13 @@ enum ndp_tag {
   NDP_TAG_DEVICE_ID = 0x0049,
   NDP_TAG_KEY_ID = 0x004A,
   NDP_TAG_PROOF = 0x004B,
-  NDP_TAG_LABEL = 0x004C
+  NDP_TAG_LABEL = 0x004C,
+  NDP_TAG_READ_ROOT = 0x004D,
+  NDP_TAG_WRITE_ROOT = 0x004E
 };
+
+/* Entries a filtered (traversal) FS_LIST reads per response, shown or not. */
+#define NDP_TRAVERSAL_SCAN_MAX 64
 
 /* Returned by ndp_agent_handle for frames that need no response (e.g. DATA frames of an upload). */
 #define NDP_NO_REPLY ((size_t)-1)

@@ -102,6 +102,20 @@ static size_t do_ping(const ndp_header *req, const uint8_t *pl, uint8_t *out, si
   return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
 }
 
+void ndp_agent_set_policy(ndp_agent *a, const ndp_policy *p) { a->policy = *p; }
+
+/* ACCESS_INFO: what this client may touch. Lets an assistant plan instead of guessing from PROTECTED_PATH errors. */
+static size_t do_access_info(ndp_agent *a, const ndp_header *req, uint8_t *out, size_t cap) {
+  ndp_tlv_w w;
+  int i;
+  if (cap < NDP_HEADER_SIZE) return 0;
+  ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
+  ndp_tlv_put_str(&w, NDP_TAG_MODE, ndp_mode_name(a->cfg.mode));
+  for (i = 0; i < a->policy.read_roots.count; i++) ndp_tlv_put_str(&w, NDP_TAG_READ_ROOT, a->policy.read_roots.entries[i]);
+  for (i = 0; i < a->policy.write_roots.count; i++) ndp_tlv_put_str(&w, NDP_TAG_WRITE_ROOT, a->policy.write_roots.entries[i]);
+  return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
+}
+
 static size_t handle_inner(ndp_agent *a, const ndp_header *req, const uint8_t *payload, uint8_t *out,
                            size_t cap) {
   if (req->version != NDP_PROTOCOL_VERSION)
@@ -130,6 +144,7 @@ static size_t handle_inner(ndp_agent *a, const ndp_header *req, const uint8_t *p
       return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "already authenticated", 0);
   }
   if (req->command == NDP_CMD_PING) return do_ping(req, payload, out, cap);
+  if (req->command == NDP_CMD_ACCESS_INFO) return do_access_info(a, req, out, cap);
   if (a->cfg.fs && (req->command == NDP_CMD_FS_LIST || req->command == NDP_CMD_FS_STAT ||
                     req->command == NDP_CMD_FS_READ))
     return ndp_agent_fs_handle(a, req, payload, out, cap);

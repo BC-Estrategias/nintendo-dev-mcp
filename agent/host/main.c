@@ -5,6 +5,8 @@
  *                        [--auth required|none] [--keys-file FILE] [--pair-code XXXX-XXXX-XXXX-XXXX] [--pair-ms N]
  * --root DIR serves DIR as the "SD card" (FS_*); without it FS commands are unsupported.
  * --write-root PATH (repeatable) replaces the default writable folder (/3ds/nintendo-dev-agent).
+ * --read-root PATH (repeatable) replaces the default readable folder ("/").
+ * --access-file FILE loads the owner's folder list (what the console UI edits) and uses it as the policy.
  * --auth required turns on pairing/HMAC (spec §4); --keys-file persists the paired keys;
  * --pair-code opens the pairing window at start with that code (tests; a real console shows a random one). */
 #define _POSIX_C_SOURCE 200809L
@@ -18,6 +20,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "ndp/ndp_access_file.h"
 #include "ndp/ndp_keystore_file.h"
 #include "ndp/ndp_posix_fs.h"
 #include "ndp/ndp_server.h"
@@ -73,7 +76,9 @@ int main(int argc, char **argv) {
   struct sigaction act;
   static ndp_server srv; /* large buffers inside: keep off the stack */
   static ndp_policy policy;
-  int custom_policy = 0;
+  int custom_policy = 0, custom_read = 0;
+  const char *access_file = NULL;
+  static ndp_access access;
   const char *pair_code = NULL;
   unsigned pair_ms = 600000;
   static ndp_keystore keys;
@@ -105,6 +110,12 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--keys-file") && i + 1 < argc) g_keys_file = argv[++i];
     else if (!strcmp(argv[i], "--pair-code") && i + 1 < argc) pair_code = argv[++i];
     else if (!strcmp(argv[i], "--pair-ms") && i + 1 < argc) pair_ms = (unsigned)atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--read-root") && i + 1 < argc) {
+      if (!custom_policy) { ndp_policy_init_default(&policy); policy.write_roots.count = 0; custom_policy = 1; }
+      if (!custom_read) { policy.read_roots.count = 0; custom_read = 1; }
+      if (ndp_pathlist_add(&policy.read_roots, argv[++i]) != NDP_OK) { fprintf(stderr, "bad --read-root\n"); return 2; }
+    }
+    else if (!strcmp(argv[i], "--access-file") && i + 1 < argc) access_file = argv[++i];
     else if (!strcmp(argv[i], "--idle-ms") && i + 1 < argc) idle_ms = (unsigned)atoi(argv[++i]);
     else if (!strcmp(argv[i], "--mode") && i + 1 < argc) {
       const char *m = argv[++i];
@@ -115,7 +126,7 @@ int main(int argc, char **argv) {
     } else if (!strcmp(argv[i], "--once")) once = 1;
     else if (!strcmp(argv[i], "-v")) g_verbose = 1;
     else {
-      fprintf(stderr, "usage: %s [--bind ADDR] [--port N] [--mode M] [--root DIR] [--write-root P]... [--idle-ms N] [--once] [-v] [--auth required|none] [--keys-file F] [--pair-code C] [--pair-ms N]\n", argv[0]);
+      fprintf(stderr, "usage: %s [--bind ADDR] [--port N] [--mode M] [--root DIR] [--write-root P]... [--idle-ms N] [--once] [-v] [--auth required|none] [--read-root P]... [--access-file F] [--keys-file F] [--pair-code C] [--pair-ms N]\n", argv[0]);
       return 2;
     }
   }
@@ -136,6 +147,12 @@ int main(int argc, char **argv) {
     if (strcmp(clean, "/") == 0) clean[0] = '\0';
     if (ndp_posix_fs_init(&fs_ops, &fs_ctx, clean) != 0) { fprintf(stderr, "--root too long\n"); return 2; }
     cfg.fs = &fs_ops;
+  }
+  if (access_file) { /* the owner's list, as the console UI would have saved it */
+    int ar = ndp_access_load_file(&access, access_file);
+    if (ar < 0) fprintf(stderr, "warning: access file is corrupt; only the agent's own folder is open\n");
+    ndp_access_to_policy(&access, &policy);
+    custom_policy = 1;
   }
   if (custom_policy) cfg.policy = &policy;
 

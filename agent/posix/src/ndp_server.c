@@ -65,6 +65,9 @@ void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_a
   memset(s, 0, sizeof *s);
   s->plat = *plat;
   s->agent_cfg = *cfg;
+  if (cfg->policy) s->policy = *cfg->policy;
+  else ndp_policy_init_default(&s->policy);
+  s->agent_cfg.policy = &s->policy;
   s->agent_cfg.keys = &s->keys;
   s->agent_cfg.pairing = &s->pairing;
   s->agent_cfg.keys_changed = server_keys_changed;
@@ -74,6 +77,11 @@ void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_a
   s->client_fd = -1;
   ndp_agent_init(&s->agent, cfg);
   ndp_decoder_init(&s->dec, s->rbuf, sizeof s->rbuf, cfg->max_frame);
+}
+
+void ndp_server_set_policy(ndp_server *s, const ndp_policy *p) {
+  s->policy = *p;
+  ndp_agent_set_policy(&s->agent, p);
 }
 
 void ndp_server_set_keys(ndp_server *s, const ndp_keystore *keys) { s->keys = *keys; }

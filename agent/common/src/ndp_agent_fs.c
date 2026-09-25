@@ -17,7 +17,8 @@ static const char *detail_for(int status) {
 }
 
 /* Extracts and policy-checks the `path` field (read access). Returns NDP_OK or an error status. */
-static int resolve_path(ndp_agent *a, const ndp_header *req, const uint8_t *pl, char *norm, const char **detail) {
+static int resolve_path(ndp_agent *a, const ndp_header *req, const uint8_t *pl, char *norm, const char **detail,
+                        int *traversal) {
   const uint8_t *v;
   size_t l;
   int rc;
@@ -26,6 +27,16 @@ static int resolve_path(ndp_agent *a, const ndp_header *req, const uint8_t *pl, 
     return NDP_ST_BAD_REQUEST;
   }
   rc = ndp_policy_check(&a->policy, a->cfg.mode, 0, v, l, norm);
+  if (traversal) *traversal = 0;
+  if (rc == NDP_ST_PROTECTED_PATH && traversal) {
+    /* not readable, but perhaps a directory on the way to a folder that is (spec §11.1) */
+    char n2[NDP_PATH_MAX + 1];
+    if (ndp_path_normalize(v, l, n2, sizeof n2) == NDP_OK && ndp_policy_traversable(&a->policy, n2)) {
+      strcpy(norm, n2);
+      *traversal = 1;
+      rc = NDP_OK;
+    }
+  }
   if (rc != NDP_OK) *detail = detail_for(rc);
   return rc;
 }
@@ -60,11 +71,12 @@ void ndp_agent_fs_close(ndp_agent *a) {
 }
 
 static size_t do_stat(ndp_agent *a, const ndp_header *req, const uint8_t *pl, uint8_t *out, size_t cap) {
+  int traversal = 0;
   char norm[NDP_PATH_MAX + 1];
   const char *detail = "";
   ndp_fs_stat st;
   ndp_tlv_w w;
-  int rc = resolve_path(a, req, pl, norm, &detail);
+  int rc = resolve_path(a, req, pl, norm, &detail, &traversal);
   if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, detail, 0);
   rc = a->cfg.fs->stat(a->cfg.fs->ctx, norm, &st);
   if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, detail_for(rc), 0);
@@ -73,6 +85,19 @@ static size_t do_stat(ndp_agent *a, const ndp_header *req, const uint8_t *pl, ui
   ndp_tlv_put_u64(&w, NDP_TAG_SIZE, st.size);
   ndp_tlv_put_u64(&w, NDP_TAG_MTIME, st.mtime);
   return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
+}
+
+/* Listing of a traversable directory: is the entry `dir/name` something the client may see? Fails closed. */
+static int child_visible(const ndp_agent *a, const char *dir, const char *name, size_t nl) {
+  char joined[NDP_PATH_MAX + 1 + 256 + 1], norm[NDP_PATH_MAX + 1];
+  size_t dl = strlen(dir);
+  if (dl + 1 + nl >= sizeof joined) return 0;
+  memcpy(joined, dir, dl);
+  if (dl > 1) joined[dl++] = '/';
+  memcpy(joined + dl, name, nl);
+  joined[dl + nl] = '\0';
+  if (ndp_path_normalize((const uint8_t *)joined, dl + nl, norm, sizeof norm) != NDP_OK) return 0;
+  return ndp_policy_child_visible(&a->policy, norm);
 }
 
 static size_t do_list(ndp_agent *a, const ndp_header *req, const uint8_t *pl, uint8_t *out, size_t cap) {
@@ -84,9 +109,9 @@ static size_t do_list(ndp_agent *a, const ndp_header *req, const uint8_t *pl, ui
   ndp_fs_stat st, es;
   ndp_tlv_w w;
   uint64_t cursor = 0;
-  int rc, entries = 0, more = 1, r;
+  int rc, entries = 0, more = 1, r, traversal = 0, scanned = 0;
 
-  rc = resolve_path(a, req, pl, norm, &detail);
+  rc = resolve_path(a, req, pl, norm, &detail, &traversal);
   if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, detail, 0);
   if (opt_num(req, pl, NDP_TAG_CURSOR, 4, &cursor) < 0) return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "bad cursor", 0);
   rc = fs->stat(fs->ctx, norm, &st);
@@ -109,13 +134,19 @@ static size_t do_list(ndp_agent *a, const ndp_header *req, const uint8_t *pl, ui
   }
 
   ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
-  while (entries < NDP_LIST_PAGE_MAX) {
+  /* a filtered listing reads (and on the 3DS stats) entries it does not show: bound the work per response */
+  while (entries < NDP_LIST_PAGE_MAX && (!traversal || scanned < NDP_TRAVERSAL_SCAN_MAX)) {
     size_t nl;
     int i;
     r = fs->dir_next(fs->ctx, a->dir.handle, name, sizeof name, &es);
     if (r == 0) { more = 0; break; }
     if (r < 0) { close_dir(a); return ndp_agent_error(out, cap, req, (uint16_t)-r, detail_for(-r), 0); }
     nl = strlen(name);
+    scanned++;
+    if (traversal && !child_visible(a, norm, name, nl)) { /* a directory on the way: only what leads to a readable folder */
+      a->dir.pos++;
+      continue;
+    }
     ev[0] = es.is_dir ? NDP_TYPE_DIR : NDP_TYPE_FILE;
     for (i = 0; i < 8; i++) ev[1 + i] = (uint8_t)(es.size >> (8 * i));
     memcpy(ev + 9, name, nl);
@@ -138,7 +169,7 @@ static size_t do_read(ndp_agent *a, const ndp_header *req, const uint8_t *pl, ui
   uint64_t offset = 0, length = 0, chunk = NDP_DEFAULT_CHUNK, want_hash = 0, will;
   int rc;
 
-  rc = resolve_path(a, req, pl, norm, &detail);
+  rc = resolve_path(a, req, pl, norm, &detail, NULL);
   if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, detail, 0);
   if (opt_num(req, pl, NDP_TAG_OFFSET, 8, &offset) < 0 || opt_num(req, pl, NDP_TAG_LENGTH, 8, &length) < 0 ||
       opt_num(req, pl, NDP_TAG_CHUNK, 4, &chunk) < 0 || opt_num(req, pl, NDP_TAG_WANT_HASH, 1, &want_hash) < 0)

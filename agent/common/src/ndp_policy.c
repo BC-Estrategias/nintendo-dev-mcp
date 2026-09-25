@@ -45,3 +45,18 @@ int ndp_policy_check(const ndp_policy *p, ndp_mode mode, int is_write, const uin
   if (norm_out) strcpy(norm_out, norm);
   return NDP_OK;
 }
+
+int ndp_policy_traversable(const ndp_policy *p, const char *norm) {
+  int i;
+  if (in_any(&p->never_read, norm)) return 0;
+  for (i = 0; i < p->read_roots.count; i++) {
+    const char *r = p->read_roots.entries[i];
+    if (ndp_path_inside(r, norm) && !ndp_path_inside(norm, r)) return 1; /* norm is a proper ancestor of r */
+  }
+  return 0;
+}
+
+int ndp_policy_child_visible(const ndp_policy *p, const char *norm) {
+  if (in_any(&p->never_read, norm)) return 0;
+  return in_any(&p->read_roots, norm) || ndp_policy_traversable(p, norm);
+}

@@ -33,4 +33,14 @@ void ndp_policy_init_default(ndp_policy *p);
 int ndp_policy_check(const ndp_policy *p, ndp_mode mode, int is_write, const uint8_t *path, size_t path_len,
                      char *norm_out);
 
+/* Directory traversal (spec §11.1): a directory that is a PROPER ANCESTOR of some read root (e.g. "/" or "/roms"
+ * when "/roms/gba" is a read root) may be stat'ed and listed — the listing shows only the entries that lead to
+ * (or are inside) a read root — so a client can navigate down to what it is allowed to read. Nothing else about
+ * such a directory is readable. Returns 1 when `norm` (a normalized path) qualifies. */
+int ndp_policy_traversable(const ndp_policy *p, const char *norm);
+
+/* 1 when a listing may show the entry `norm`: it is inside a read root (and not in a never_read zone) or it is
+ * traversable. Used to filter the listing of a traversable directory. */
+int ndp_policy_child_visible(const ndp_policy *p, const char *norm);
+
 #endif

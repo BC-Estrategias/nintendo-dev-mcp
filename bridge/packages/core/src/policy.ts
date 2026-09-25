@@ -65,3 +65,16 @@ export function checkPolicy(cfg: PolicyConfig, mode: Mode, op: Operation, path: 
   if (!roots.some((r) => pathInside(normalized, r))) return decide("PROTECTED_PATH");
   return decide("OK", normalized);
 }
+
+/** Spec §11.1: a directory that is a PROPER ANCESTOR of a read root (and not in a never_read zone) may be stat'ed
+ * and listed (the listing shows only what leads to a readable folder). `norm` must be a normalized path. */
+export function isTraversable(cfg: PolicyConfig, norm: string): boolean {
+  if (cfg.neverRead.some((n) => pathInside(norm, n))) return false;
+  return cfg.readRoots.some((r) => pathInside(r, norm) && !pathInside(norm, r));
+}
+
+/** Whether the listing of a traversable directory shows the entry `norm`. */
+export function isChildVisible(cfg: PolicyConfig, norm: string): boolean {
+  if (cfg.neverRead.some((n) => pathInside(norm, n))) return false;
+  return cfg.readRoots.some((r) => pathInside(norm, r)) || isTraversable(cfg, norm);
+}

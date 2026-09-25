@@ -38,6 +38,7 @@ typedef struct {
   uint32_t connections_closed;
   uint32_t requests;
 
+  ndp_policy policy;     /* the access policy in force (the owner can change it while running) */
   ndp_keystore keys;     /* paired computers (persisted by the platform) */
   ndp_pairing pairing;   /* the pairing window (spans connections) */
 
@@ -66,6 +67,10 @@ void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_a
 /* Starts listening on `s_addr` (network byte order) and `port` (0 = ephemeral). Closes any previous
  * listener/client first. Returns 0, or a negative errno-style value. */
 int ndp_server_listen(ndp_server *s, uint32_t s_addr, uint16_t port);
+
+/* Replaces the access policy at run time (the owner edited the allowed folders on the console). It applies to
+ * the current connection from its next request on and to every later one. */
+void ndp_server_set_policy(ndp_server *s, const ndp_policy *p);
 
 /* Loads the persisted key store (call before listening). Pass the bytes read from the store file. */
 void ndp_server_set_keys(ndp_server *s, const ndp_keystore *keys);

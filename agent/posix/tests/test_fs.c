@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "ndp/ndp_access.h"
 #include "ndp/ndp_agent.h"
 #include "ndp/ndp_names.h"
 #include "ndp/ndp_posix_fs.h"
@@ -429,6 +430,107 @@ static void test_gating(void) {
   CHECK(is_err(r, NDP_ST_UNSUPPORTED_COMMAND), "FS without a filesystem backend");
 }
 
+/* Spec §11.1: with read roots deep in the tree, the directories on the way can be stat'ed and listed, but a
+ * listing shows only what leads to a readable folder; everything else stays PROTECTED_PATH. */
+static void test_traversal(void) {
+  char tmpl[] = "/tmp/ndp-trav-test-XXXXXX", cmd[128], saved[64];
+  ndp_posix_fs_ctx ctx;
+  ndp_fs_ops ops;
+  ndp_agent a;
+  ndp_agent_config cfg;
+  ndp_policy pol;
+  ndp_access acc;
+  static char names[64 * 1024];
+  resp_t r;
+  treq t;
+  int i;
+  if (!mkdtemp(tmpl)) { perror("mkdtemp"); exit(2); }
+  strcpy(saved, g_root);
+  snprintf(g_root, sizeof g_root, "%s", tmpl);
+  make_dir("/roms"); make_dir("/roms/gba"); make_dir("/roms/nds"); make_dir("/luma"); make_dir("/3ds");
+  make_dir("/3ds/nintendo-dev-agent"); make_dir("/3ds/other"); make_dir("/pg"); make_dir("/pg/keep"); make_dir("/pg/keep/sub");
+  write_file("/roms/gba/game.gba", "GBA", 3); write_file("/roms/nds/x.nds", "NDS", 3); write_file("/roms/note.txt", "n", 1);
+  write_file("/luma/secret", "S", 1); write_file("/top.txt", "t", 1); write_file("/3ds/other/o", "o", 1);
+  write_file("/3ds/nintendo-dev-agent/agent.log", "log", 3); write_file("/pg/keep/sub/deep.txt", "d", 1);
+  for (i = 0; i < 200; i++) { char rel[64]; snprintf(rel, sizeof rel, "/pg/f%03d", i); make_dir(rel); }
+  if (ndp_posix_fs_init(&ops, &ctx, g_root) != 0) exit(2);
+
+  ndp_access_init(&acc);
+  CHECK(ndp_access_set(&acc, "/roms/gba", NDP_LVL_READ) == NDP_OK && ndp_access_set(&acc, "/pg/keep/sub", NDP_LVL_READ) == NDP_OK, "owner opens two deep folders");
+  ndp_access_to_policy(&acc, &pol);
+  memset(&cfg, 0, sizeof cfg);
+  cfg.platform = "host"; cfg.agent_version = "t"; cfg.auth = "none"; cfg.mode = NDP_MODE_READ_ONLY;
+  cfg.max_frame = 65536; cfg.fs = &ops; cfg.policy = &pol;
+  ndp_agent_init(&a, &cfg);
+  treq_init(&t);
+  ndp_tlv_put_u16(&t.w, NDP_TAG_PROTOCOL, 1); ndp_tlv_put_u16(&t.w, NDP_TAG_PROTOCOL_MAX, 1);
+  { uint8_t n[16] = {0}; ndp_tlv_put(&t.w, NDP_TAG_NONCE, n, 16); }
+  CHECK(is_res(go(&a, NDP_CMD_HELLO, &t)), "hello");
+
+  r = simple(&a, NDP_CMD_FS_LIST, "/");
+  CHECK(is_res(r) && collect_entries(r, names, sizeof names, NULL) == 3 && strstr(names, "roms\n") && strstr(names, "3ds\n") && strstr(names, "pg\n"), "root lists only the ways in: got [%s]", names);
+  CHECK(!strstr(names, "luma") && !strstr(names, "top.txt"), "root hides luma and files");
+  r = simple(&a, NDP_CMD_FS_LIST, "/roms");
+  CHECK(is_res(r) && collect_entries(r, names, sizeof names, NULL) == 1 && strstr(names, "gba\n"), "/roms lists only gba: [%s]", names);
+  r = simple(&a, NDP_CMD_FS_LIST, "/3ds");
+  CHECK(is_res(r) && collect_entries(r, names, sizeof names, NULL) == 1 && strstr(names, "nintendo-dev-agent\n"), "/3ds lists only the workspace: [%s]", names);
+  r = simple(&a, NDP_CMD_FS_LIST, "/pg/keep");
+  CHECK(is_res(r) && collect_entries(r, names, sizeof names, NULL) == 1 && strstr(names, "sub\n"), "/pg/keep -> sub");
+  { /* paging with a filter: 201 raw entries, 1 shown; the cursor must still walk the whole directory */
+    long next = 0; int total = 0, pages = 0;
+    do {
+      treq q; treq_init(&q); t_path(&q, "/pg"); ndp_tlv_put_u32(&q.w, NDP_TAG_CURSOR, (uint32_t)next);
+      r = go(&a, NDP_CMD_FS_LIST, &q);
+      CHECK(is_res(r), "filtered page");
+      total += collect_entries(r, names, sizeof names, NULL); pages++;
+      next = tlv_u32(r, NDP_TAG_NEXT_CURSOR);
+    } while (tlv_u8(r, NDP_TAG_LIST_MORE) == 1 && pages < 20);
+    CHECK(total == 1 && pages >= 3, "filtered paging (scan cap): one visible entry over several short pages (got %d in %d)", total, pages);
+  }
+  CHECK(is_res(simple(&a, NDP_CMD_FS_STAT, "/")) && is_res(simple(&a, NDP_CMD_FS_STAT, "/roms")), "stat of traversal directories");
+  CHECK(is_err(simple(&a, NDP_CMD_FS_STAT, "/roms/note.txt"), NDP_ST_PROTECTED_PATH), "a file next to the way is not readable");
+  CHECK(is_err(simple(&a, NDP_CMD_FS_STAT, "/luma"), NDP_ST_PROTECTED_PATH), "luma: no traversal, no stat");
+  CHECK(is_err(simple(&a, NDP_CMD_FS_LIST, "/roms/nds"), NDP_ST_PROTECTED_PATH), "sibling of a root: closed");
+  CHECK(is_err(simple(&a, NDP_CMD_FS_LIST, "/luma"), NDP_ST_PROTECTED_PATH), "luma listing closed");
+  CHECK(is_err(simple(&a, NDP_CMD_FS_READ, "/top.txt"), NDP_ST_PROTECTED_PATH), "reading a file in a traversal dir: closed");
+  CHECK(is_err(simple(&a, NDP_CMD_FS_READ, "/roms"), NDP_ST_PROTECTED_PATH), "READ never traverses");
+  r = simple(&a, NDP_CMD_FS_LIST, "/roms/gba");
+  CHECK(is_res(r) && collect_entries(r, names, sizeof names, NULL) == 1 && strstr(names, "game.gba\n"), "inside a root: normal listing");
+  r = simple(&a, NDP_CMD_FS_LIST, "/3ds/nintendo-dev-agent");
+  CHECK(is_res(r) && strstr((collect_entries(r, names, sizeof names, NULL), names), "agent.log\n"), "the workspace is always open");
+
+  { /* ACCESS_INFO tells the client what it may touch */
+    treq q; const uint8_t *v; size_t l, i2 = 0; int reads = 0, writes = 0;
+    treq_init(&q);
+    r = go(&a, NDP_CMD_ACCESS_INFO, &q);
+    CHECK(is_res(r), "ACCESS_INFO");
+    while (r.len - i2 >= 4) {
+      uint16_t tag = (uint16_t)(r.pl[i2] | (r.pl[i2 + 1] << 8));
+      size_t vl = (size_t)r.pl[i2 + 2] | ((size_t)r.pl[i2 + 3] << 8);
+      if (tag == NDP_TAG_READ_ROOT) reads++;
+      if (tag == NDP_TAG_WRITE_ROOT) writes++;
+      i2 += 4 + vl;
+    }
+    CHECK(reads == 3 && writes == 1, "ACCESS_INFO lists 3 read roots (workspace + 2) and 1 write root, got %d/%d", reads, writes);
+    CHECK(ndp_tlv_find(r.pl, r.len, NDP_TAG_MODE, &v, &l) && l == 9 && memcmp(v, "READ_ONLY", 9) == 0, "ACCESS_INFO mode");
+  }
+
+  /* the owner changes the list on the console: it applies from the next request */
+  ndp_access_set(&acc, "/roms/nds", NDP_LVL_READ);
+  ndp_access_to_policy(&acc, &pol);
+  ndp_agent_set_policy(&a, &pol);
+  CHECK(is_res(simple(&a, NDP_CMD_FS_LIST, "/roms/nds")), "the newly opened folder is readable at once");
+  ndp_access_set(&acc, "/roms/nds", NDP_LVL_NONE);
+  ndp_access_to_policy(&acc, &pol);
+  ndp_agent_set_policy(&a, &pol);
+  CHECK(is_err(simple(&a, NDP_CMD_FS_LIST, "/roms/nds"), NDP_ST_PROTECTED_PATH), "and closed again at once");
+
+  ndp_agent_close(&a);
+  snprintf(cmd, sizeof cmd, "rm -rf %s", tmpl);
+  if (system(cmd) != 0) printf("warning: cleanup failed for %s\n", tmpl);
+  strcpy(g_root, saved);
+}
+
 int main(void) {
   char tmpl[] = "/tmp/ndp-fs-test-XXXXXX";
   char cmd[128];
@@ -443,6 +545,7 @@ int main(void) {
   test_read();
   test_busy_abort_shrink();
   test_gating();
+  test_traversal();
 
   ndp_agent_close(&g_agent);
   snprintf(cmd, sizeof cmd, "rm -rf %s", g_root);

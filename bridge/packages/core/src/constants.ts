@@ -17,6 +17,7 @@ export const Command = {
   PING: 0x0002,
   PAIR: 0x0004,
   AUTH: 0x0005,
+  ACCESS_INFO: 0x0011,
   FS_LIST: 0x0020,
   FS_STAT: 0x0021,
   FS_READ: 0x0022,
@@ -99,6 +100,8 @@ export const Tag = {
   KEY_ID: 0x004a,
   PROOF: 0x004b,
   LABEL: 0x004c,
+  READ_ROOT: 0x004d,
+  WRITE_ROOT: 0x004e,
 } as const;
 
 export type Mode = "READ_ONLY" | "DEVELOPMENT" | "FULL";

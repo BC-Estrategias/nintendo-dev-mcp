@@ -72,6 +72,15 @@ export interface WriteResult {
   ms: number;
 }
 
+/** What the console's owner has opened to this computer (they choose it ON the console). */
+export interface AccessInfo {
+  mode: Mode;
+  /** Folders readable (recursively). Directories above them can be listed only to navigate down (spec §11.1). */
+  readRoots: string[];
+  /** Folders writable when the mode allows writes. Always a subset of readRoots. */
+  writeRoots: string[];
+}
+
 export interface HelloInfo {
   protocol: number;
   platform: string;
@@ -407,6 +416,21 @@ export class NdpClient {
     };
     this.#decoder = new FrameDecoder(maxFrame);
     return this.#info;
+  }
+
+  /** The folders the console's owner allows this computer to read and write (agent >= 0.6.0). */
+  async accessInfo(): Promise<AccessInfo> {
+    const res = await this.request(Command.ACCESS_INFO);
+    const t = parseTlv(res.payload);
+    const mode = t.str(Tag.MODE);
+    if (mode === undefined || !(MODES as readonly string[]).includes(mode))
+      throw new NdpProtocolError(Status.BAD_REQUEST, "malformed ACCESS_INFO response");
+    const dec = new TextDecoder();
+    return {
+      mode: mode as Mode,
+      readRoots: t.all(Tag.READ_ROOT).map((b) => dec.decode(b)),
+      writeRoots: t.all(Tag.WRITE_ROOT).map((b) => dec.decode(b)),
+    };
   }
 
   /** True once AUTH succeeded and every frame is being sealed. */

@@ -75,6 +75,8 @@ typedef struct {
 } ndp_agent;
 
 void ndp_agent_init(ndp_agent *a, const ndp_agent_config *cfg);
+/* Replaces the access policy at run time (the owner edited the allowed folders on the console). */
+void ndp_agent_set_policy(ndp_agent *a, const ndp_policy *p);
 
 /* Handles one decoded frame and writes exactly one response frame (RES or ERR) into `out`.
  * `mac` is the 16-byte MAC that followed the payload, or NULL when the frame carried none. After a

@@ -2,7 +2,7 @@ import { createWriteStream, existsSync, renameSync, rmSync } from "node:fs";
 import { once } from "node:events";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import { NdpRemoteError, NdpTransportError, PathInvalidError, Status, discover, expandHosts, type FsEntry } from "@ndev/core";
+import { NdpRemoteError, NdpTransportError, PathInvalidError, Status, discover, expandHosts, type AccessInfo, type FsEntry } from "@ndev/core";
 import { Audit } from "./audit.ts";
 import { DeviceConnection, DeviceNotFoundError } from "./connection.ts";
 
@@ -37,7 +37,7 @@ export function describeError(e: unknown, host: string | null): string {
   if (e instanceof NdpRemoteError) {
     const hints: Record<string, string> = {
       FORBIDDEN_MODE: "The console agent is in READ_ONLY mode. Ask the user to press X on the 3DS to enable DEVELOPMENT mode.",
-      PROTECTED_PATH: "That path is outside the folders the agent is allowed to write (default: /3ds/nintendo-dev-agent) or is a protected system zone (/luma, /Nintendo 3DS, /boot.firm, ...). Do not try to work around it; ask the user.",
+      PROTECTED_PATH: "That path is outside the folders the console's owner opened for this operation (nintendo_device_info lists readable_folders and writable_folders) or is a protected system zone (/luma, /Nintendo 3DS, /boot.firm, ...). Do not try to work around it: ask the user to open the folder on the console (A button > Access folders) if they want it.",
       EXISTS: "It already exists. Nothing was changed. Pass overwrite=true (optionally backup=true) only if replacing it is what the user wants.",
       NOT_FOUND: "No such file or directory (or the parent folder does not exist; folders are never created implicitly — use nintendo_fs_mkdir).",
       BAD_REQUEST: e.detail ?? "The request was rejected as invalid.",
@@ -132,27 +132,34 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 
   tool("nintendo_device_info", {
     title: "Device and agent information",
-    description: `Returns what the console agent reports about itself: platform, agent and protocol version, access mode (READ_ONLY forbids all writes; DEVELOPMENT allows writes only inside the writable folders), max frame size and its network address. ${HARDWARE} Model, memory and SD free space are NOT available yet (the agent has no DEVICE_INFO command); they are reported as unavailable, never guessed.`,
+    description: `Returns what the console agent reports about itself: platform, agent and protocol version, access mode (READ_ONLY forbids all writes; DEVELOPMENT allows writes only inside the writable folders), the folders the console's owner has opened for reading and for writing (readable_folders / writable_folders — everything else is off limits), max frame size and its network address. ${HARDWARE} Model, memory and SD free space are NOT available yet (the agent has no DEVICE_INFO command); they are reported as unavailable, never guessed.`,
     inputSchema: z.object({}),
     readOnly: true,
   }, async () => {
     const info = await ctx.conn.run(async (c) => {
       const rtt = await c.ping();
-      return { hello: c.info!, rtt };
+      let access: AccessInfo | null = null;
+      try {
+        access = await c.accessInfo();
+      } catch (e) {
+        if (!(e instanceof NdpRemoteError && e.statusName === "UNSUPPORTED_COMMAND")) throw e; // agent older than 0.6.0
+      }
+      return { hello: c.info!, rtt, access };
     }, { idempotent: true });
     const h = info.hello;
     const data = {
       host: ctx.conn.host, port: ctx.conn.port, platform: h.platform, agent_version: h.agentVersion, protocol_version: h.protocol,
       mode: h.mode, auth: h.auth, max_frame_bytes: h.maxFrame, rtt_ms: Math.round(info.rtt * 10) / 10,
-      default_writable_folder: "/3ds/nintendo-dev-agent",
+      readable_folders: info.access?.readRoots ?? null,
+      writable_folders: info.access?.writeRoots ?? null,
       unavailable: ["model", "memory", "sd_total", "sd_free"],
     };
-    return ok(`${h.platform} agent v${h.agentVersion} at ${ctx.conn.host}:${ctx.conn.port}, mode ${h.mode}, auth ${h.auth}, ping ${data.rtt_ms} ms. Writes are only possible in DEVELOPMENT mode and only inside the writable folders (default /3ds/nintendo-dev-agent).`, data);
+    return ok(`${h.platform} agent v${h.agentVersion} at ${ctx.conn.host}:${ctx.conn.port}, mode ${h.mode}, auth ${h.auth}, ping ${data.rtt_ms} ms. Writes are only possible in DEVELOPMENT mode and only inside the writable folders.${info.access ? ` Readable folders: ${info.access.readRoots.join(", ")}. Writable folders: ${info.access.writeRoots.join(", ")}.` : ""} Only the console's owner can change these lists, on the console itself.`, data);
   });
 
   tool("nintendo_fs_list", {
     title: "List a directory on the SD card",
-    description: `Lists the entries of a directory on the console's SD card (name, type, size). Sizes cost ~10 ms per entry on the device, so very large folders are slow. Results are capped at ${LIST_MAX} entries. Reading is allowed almost everywhere on the SD card (only the agent's own config is hidden). ${HARDWARE}`,
+    description: `Lists the entries of a directory on the console's SD card (name, type, size). Sizes cost ~10 ms per entry on the device, so very large folders are slow. Results are capped at ${LIST_MAX} entries. Reading is limited to the folders the console's owner opened (see nintendo_device_info); the folders above them can be listed only to navigate down and show just what leads to an opened folder. ${HARDWARE}`,
     inputSchema: z.object({ path }),
     readOnly: true,
     audit: (a) => ({ path: a.path }),

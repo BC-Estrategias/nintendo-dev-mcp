@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "ndp/ndp_agent.h"
+#include "ndp/ndp_access.h"
 #include "ndp/ndp_auth.h"
 #include "ndp/ndp_frame.h"
 #include "ndp/ndp_names.h"
@@ -409,6 +410,79 @@ static void test_auth_dialogues(void) {
 }
 
 
+static void test_traversal_and_access(void) {
+  int i, j;
+  for (i = 0; i < V_TRAV_N; i++) {
+    const v_trav_t *e = &v_travs[i];
+    ndp_policy p;
+    load_list(&p.read_roots, v_cfgs[e->cfg].read_roots);
+    load_list(&p.write_roots, v_cfgs[e->cfg].write_roots);
+    load_list(&p.never_read, v_cfgs[e->cfg].never_read);
+    load_list(&p.never_write, v_cfgs[e->cfg].never_write);
+    CHECK(ndp_policy_traversable(&p, e->path) == e->traversable, "traversable cfg=%d %s", e->cfg, e->path);
+    CHECK(ndp_policy_child_visible(&p, e->path) == e->visible, "visible cfg=%d %s", e->cfg, e->path);
+  }
+  for (i = 0; i < V_ACCESS_N; i++) {
+    const v_access_t *sc = &v_accesses[i];
+    ndp_access a, back;
+    ndp_policy pol;
+    uint8_t buf[NDP_ACCESS_MAX_BYTES];
+    size_t n;
+    ndp_access_init(&a);
+    for (j = 0; j < sc->n; j++) {
+      const v_aop_t *op = &sc->ops[j];
+      char raw[NDP_PATH_MAX + 2];
+      memcpy(raw, op->path, op->path_len);
+      raw[op->path_len] = '\0';
+      if (op->is_next) {
+        int got = (int)ndp_access_next(&a, raw);
+        CHECK(got == op->expect, "access %s op %d next(%s) expected %d got %d", sc->name, j, raw, op->expect, got);
+      } else {
+        int got = ndp_access_set(&a, raw, (ndp_level)op->level);
+        CHECK(got == op->expect, "access %s op %d set(%s,%d) expected %d got %d", sc->name, j, raw, op->level, op->expect, got);
+      }
+    }
+    ndp_access_to_policy(&a, &pol);
+    for (j = 0; j < 8; j++) {
+      if (sc->read_roots[j] == NULL) { CHECK(pol.read_roots.count == j, "%s: read root count %d vs %d", sc->name, pol.read_roots.count, j); break; }
+      CHECK(j < pol.read_roots.count && strcmp(pol.read_roots.entries[j], sc->read_roots[j]) == 0, "%s: read root %d", sc->name, j);
+    }
+    for (j = 0; j < 8; j++) {
+      if (sc->write_roots[j] == NULL) { CHECK(pol.write_roots.count == j, "%s: write root count", sc->name); break; }
+      CHECK(j < pol.write_roots.count && strcmp(pol.write_roots.entries[j], sc->write_roots[j]) == 0, "%s: write root %d", sc->name, j);
+    }
+    n = ndp_access_serialize(&a, buf, sizeof buf);
+    CHECK(n == sc->file_len && memcmp(buf, sc->file, n) == 0, "%s: file bytes equal the reference", sc->name);
+    CHECK(ndp_access_parse(&back, sc->file, sc->file_len) == 0 && back.count == a.count, "%s: parse", sc->name);
+    { /* any single-byte corruption is detected and leaves the list EMPTY (fail closed) */
+      size_t k;
+      for (k = 0; k < sc->file_len; k++) {
+        uint8_t bad[NDP_ACCESS_MAX_BYTES];
+        memcpy(bad, sc->file, sc->file_len);
+        bad[k] ^= 0x40;
+        CHECK(ndp_access_parse(&back, bad, sc->file_len) != 0 && back.count == 0, "%s: corruption at byte %zu detected", sc->name, k);
+      }
+      CHECK(ndp_access_parse(&back, sc->file, sc->file_len - 1) != 0, "%s: truncated file rejected", sc->name);
+      CHECK(ndp_access_serialize(&a, buf, NDP_ACCESS_MAX_BYTES - 1) == 0, "%s: small buffer refused", sc->name);
+    }
+  }
+  { /* a hand-made file that passes the checksum but holds a forbidden or non-canonical entry is refused */
+    static const struct { uint8_t level; const char *path; } bad[] = {
+      {2, "/luma"}, {1, "/3ds/nintendo-dev-agent/config"}, {1, "/a/"}, {1, "relative"}, {3, "/x"}, {0, "/x"}, {1, "/A"}};
+    for (i = 0; i < (int)(sizeof bad / sizeof bad[0]); i++) {
+      uint8_t f[NDP_ACCESS_MAX_BYTES];
+      ndp_access a;
+      size_t o = 8, l = strlen(bad[i].path);
+      memcpy(f, "NDPA", 4);
+      f[4] = 1; f[5] = (uint8_t)(i == 6 ? 2 : 1); f[6] = f[7] = 0;
+      f[o++] = bad[i].level; f[o++] = (uint8_t)l; memcpy(f + o, bad[i].path, l); o += l;
+      if (i == 6) { f[o++] = 1; f[o++] = 2; memcpy(f + o, "/a", 2); o += 2; } /* /A and /a are the same folder */
+      ndp_sha256(f, o, f + o);
+      CHECK(ndp_access_parse(&a, f, o + 32) != 0 && a.count == 0, "forged file #%d rejected", i);
+    }
+  }
+}
+
 int main(void) {
   test_sha256();
   test_hmac();
@@ -419,6 +493,7 @@ int main(void) {
   test_tlv();
   test_paths();
   test_policy();
+  test_traversal_and_access();
   test_dialogues();
   test_auth_primitives();
   test_keystore();

@@ -147,6 +147,19 @@ CONFIGS = {
         "never_write": ["/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private",
                         "/3ds/nintendo-dev-agent/config"],
     },
+    "narrow": {  # o dono liberou só duas pastas fundas: os ancestrais viram "travessia" (spec §11.1)
+        "read_roots": ["/roms/gba", "/3ds/nintendo-dev-agent"],
+        "write_roots": ["/3ds/nintendo-dev-agent"],
+        "never_read": ["/3ds/nintendo-dev-agent/config"],
+        "never_write": ["/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private",
+                        "/3ds/nintendo-dev-agent/config"],
+    },
+    "hidden": {  # uma raiz DENTRO de uma zona never_read: a zona vence, e ela não pode servir de caminho
+        "read_roots": ["/a/b/c", "/ok"],
+        "write_roots": [],
+        "never_read": ["/a/b"],
+        "never_write": [],
+    },
     "wide": {  # usuário liberou a raiz inteira: as zonas never_* continuam valendo
         "read_roots": ["/"],
         "write_roots": ["/"],
@@ -171,6 +184,102 @@ def policy_check(cfg, mode, op, raw: bytes):
     if not any(inside(p, r) for r in roots):
         return "PROTECTED_PATH"
     return "OK"
+
+
+def traversable(cfg, p_norm):
+    """§11.1: ancestral PRÓPRIO de alguma read_root (e fora de never_read)."""
+    if any(inside(p_norm, n) for n in cfg["never_read"]):
+        return False
+    return any(inside(r, p_norm) and not inside(p_norm, r) for r in cfg["read_roots"])
+
+
+def child_visible(cfg, p_norm):
+    if any(inside(p_norm, n) for n in cfg["never_read"]):
+        return False
+    return any(inside(p_norm, r) for r in cfg["read_roots"]) or traversable(cfg, p_norm)
+
+
+# ---- lista de pastas do dono (§11.2): implementação de referência
+WORKSPACE = "/3ds/nintendo-dev-agent"
+ACCESS_MAX = 6
+DEF_NEVER_READ = CONFIGS["default"]["never_read"]
+DEF_NEVER_WRITE = CONFIGS["default"]["never_write"]
+
+
+def access_allowed(p, level):
+    if level == 0:
+        return True
+    if any(inside(p, n) for n in DEF_NEVER_READ):
+        return False
+    if level == 2 and any(inside(p, n) for n in DEF_NEVER_WRITE):
+        return False
+    return True
+
+
+class Access:
+    def __init__(self):
+        self.e = []  # [path_norm, level]
+
+    def _find(self, p):
+        for i, (q, _) in enumerate(self.e):
+            if comps_of(q) == comps_of(p):
+                return i
+        return -1
+
+    def _from(self, p, skip=-1):
+        best = 2 if inside(p, WORKSPACE) else 0
+        for i, (q, lv) in enumerate(self.e):
+            if i != skip and inside(p, q) and lv > best:
+                best = lv
+        return best
+
+    def level(self, p):
+        i = self._find(p)
+        return self._from(p), (self.e[i][1] if i >= 0 else 0)
+
+    def set(self, raw: bytes, level):
+        try:
+            p = normalize(raw)
+        except PathInvalid:
+            return "PATH_INVALID"
+        if not access_allowed(p, level):
+            return "PROTECTED_PATH"
+        i = self._find(p)
+        if level == 0:
+            if i >= 0:
+                del self.e[i]
+            return "OK"
+        if i < 0:
+            if len(self.e) >= ACCESS_MAX:
+                return "NO_SPACE"
+            self.e.append([p, level])
+        else:
+            self.e[i][1] = level
+        return "OK"
+
+    def next(self, raw: bytes):
+        p = normalize(raw)
+        _, exp = self.level(p)
+        inh = self._from(p, self._find(p))
+        opts = [0]
+        if inh < 1 and access_allowed(p, 1):
+            opts.append(1)
+        if inh < 2 and access_allowed(p, 2):
+            opts.append(2)
+        if exp in opts:
+            i = opts.index(exp)
+            return opts[i + 1] if i + 1 < len(opts) else 0
+        return 0
+
+    def policy_lists(self):
+        return ([WORKSPACE] + [q for q, _ in self.e], [WORKSPACE] + [q for q, lv in self.e if lv == 2])
+
+    def serialize(self):
+        b = b"NDPA" + bytes([1, len(self.e), 0, 0])
+        for q, lv in self.e:
+            qb = q.encode("utf-8")
+            b += bytes([lv, len(qb)]) + qb
+        return b + hashlib.sha256(b).digest()
 
 
 # ---------------------------------------------------------------- agente de referência (M0)
@@ -671,6 +780,49 @@ def build():
                     "status_code": STATUS[st]})
     v["policy"] = pol
 
+    # travessia (§11.1)
+    trav = []
+    for cfg in ("default", "custom", "narrow", "hidden", "wide"):
+        for p in ("/", "/roms", "/roms/gba", "/roms/gba/game.gba", "/roms/nds", "/romsx", "/ROMS", "/3ds",
+                  "/3DS", "/3ds/nintendo-dev-agent", "/3ds/nintendo-dev-agent/config",
+                  "/3ds/nintendo-dev-agent/config/k", "/3ds/other", "/luma", "/cias", "/Nintendo 3DS", "/a", "/a/b", "/a/b/c", "/ok"):
+            trav.append({"config": cfg, "path": p, "traversable": traversable(CONFIGS[cfg], p),
+                         "visible": child_visible(CONFIGS[cfg], p)})
+    v["traverse"] = trav
+
+    # lista de pastas do dono (§11.2)
+    def scenario(name, ops):
+        a, out = Access(), []
+        for kind, raw, level in ops:
+            if kind == "set":
+                r = a.set(raw, level)
+                out.append({"op": "set", "path": raw.decode("utf-8", "replace"), "path_hex": hx(raw), "level": level,
+                            "expect": STATUS[r]})
+            else:
+                out.append({"op": "next", "path": raw.decode("utf-8", "replace"), "path_hex": hx(raw), "level": 0,
+                            "expect": a.next(raw)})
+        rd, wr = a.policy_lists()
+        return {"name": name, "ops": out, "read_roots": rd, "write_roots": wr, "file_hex": hx(a.serialize()),
+                "entries": a.e}
+
+    acc = [
+        scenario("basic", [
+            ("set", b"/roms", 1), ("set", b"/roms/gba", 2), ("set", b"/luma", 1), ("set", b"/luma", 2),
+            ("set", b"/3ds/nintendo-dev-agent/config", 1), ("set", b"relative", 1), ("set", b"/a/../b", 1),
+            ("next", b"/roms", 0), ("next", b"/roms/gba", 0), ("next", b"/roms/nds", 0), ("next", b"/x", 0),
+            ("next", b"/3ds/nintendo-dev-agent/inbox", 0), ("next", b"/Nintendo 3DS", 0), ("next", b"/luma/x", 0),
+            ("next", b"/3ds/nintendo-dev-agent/config", 0), ("set", b"/ROMS", 2), ("next", b"/roms", 0),
+            ("set", b"/roms", 0), ("set", b"/nonexistent", 0), ("next", b"/roms/gba", 0)]),
+        scenario("full_list", [
+            ("set", b"/a", 1), ("set", b"/b", 2), ("set", b"/c", 1), ("set", b"/d", 1), ("set", b"/e", 2),
+            ("set", b"/f", 1), ("set", b"/g", 1), ("set", b"/a", 2), ("set", b"/b", 0), ("set", b"/g", 1)]),
+        scenario("whole_card", [
+            ("set", b"/", 1), ("next", b"/", 0), ("next", b"/roms", 0), ("set", b"/", 2), ("set", b"/Nintendo 3DS", 2),
+            ("next", b"/", 0)]),
+        scenario("empty", []),
+    ]
+    v["access"] = acc
+
     # diálogos do agente (M0: HELLO/PING)
     def dlg(name, steps):
         state, out = {}, []
@@ -797,7 +949,7 @@ def emit_h(v) -> str:
              "const char *never_read[8]; const char *never_write[8]; } v_cfg_t;\n")
 
     def arr(xs):
-        return "{" + ", ".join(c_str(x) for x in xs) + (", NULL" if len(xs) < 8 else "") + "}"
+        return "{" + ", ".join([c_str(x) for x in xs] + (["NULL"] if len(xs) < 8 else [])) + "}"
     L.append("static const v_cfg_t v_cfgs[] = {\n")
     for n in cfg_names:
         c = v["policy_configs"][n]
@@ -812,6 +964,33 @@ def emit_h(v) -> str:
         L.append(f"  {{{cfg_names.index(e['config'])}, {MODES.index(e['mode'])}, {1 if e['op'] == 'write' else 0}, "
                  f"v_po_path_{i}, {len(e['path_hex']) // 2}, {e['status_code']}}},\n")
     L.append("};\n#define V_POLICY_N %d\n\n" % len(v["policy"]))
+    # travessia
+    L.append("typedef struct { int cfg; const char *path; int traversable; int visible; } v_trav_t;\n"
+             "static const v_trav_t v_travs[] = {\n")
+    for e in v["traverse"]:
+        L.append(f"  {{{cfg_names.index(e['config'])}, {c_str(e['path'])}, {1 if e['traversable'] else 0}, "
+                 f"{1 if e['visible'] else 0}}},\n")
+    L.append("};\n#define V_TRAV_N %d\n\n" % len(v["traverse"]))
+    # lista de pastas do dono
+    L.append("typedef struct { int is_next; const uint8_t *path; size_t path_len; int level; int expect; } v_aop_t;\n"
+             "typedef struct { const char *name; const v_aop_t *ops; int n; const char *read_roots[8]; "
+             "const char *write_roots[8]; const uint8_t *file; size_t file_len; } v_access_t;\n")
+    for si, sc in enumerate(v["access"]):
+        for oi, op in enumerate(sc["ops"]):
+            L.append(c_bytes(f"v_ac_p_{si}_{oi}", bytes.fromhex(op["path_hex"])))
+        L.append(c_bytes(f"v_ac_file_{si}", bytes.fromhex(sc["file_hex"])))
+        L.append(f"static const v_aop_t v_ac_ops_{si}[] = {{\n")
+        for oi, op in enumerate(sc["ops"]):
+            L.append(f"  {{{1 if op['op'] == 'next' else 0}, v_ac_p_{si}_{oi}, {len(op['path_hex']) // 2}, "
+                     f"{op['level']}, {op['expect']}}},\n")
+        if not sc["ops"]:
+            L.append("  {0, NULL, 0, 0, 0}\n")
+        L.append("};\n")
+    L.append("static const v_access_t v_accesses[] = {\n")
+    for si, sc in enumerate(v["access"]):
+        L.append(f"  {{{c_str(sc['name'])}, v_ac_ops_{si}, {len(sc['ops'])}, {arr(sc['read_roots'])}, "
+                 f"{arr(sc['write_roots'])}, v_ac_file_{si}, {len(sc['file_hex']) // 2}}},\n")
+    L.append("};\n#define V_ACCESS_N %d\n\n" % len(v["access"]))
     # dialogues
     ac = v["agent_config"]
     L.append(f"#define V_AGENT_PLATFORM {c_str(ac['platform'])}\n#define V_AGENT_VERSION {c_str(ac['agent_version'])}\n"

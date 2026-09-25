@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  Flag, FrameDecoder, HEADER_SIZE, Kind, NdpProtocolError, PathInvalidError, Status, checkPolicy, decodeHeader,
+  Flag, FrameDecoder, HEADER_SIZE, Kind, NdpProtocolError, PathInvalidError, Status, checkPolicy, isChildVisible, isTraversable, decodeHeader,
   encodeFrame, frameMac, makePolicy, normalizePath, parseTlv, pathInside, statusName, type Mode,
 } from "../src/index.ts";
 
@@ -127,4 +127,17 @@ test("tlv: first occurrence wins, overrun is malformed", () => {
   assert.equal(m.first(3)?.length, 0);
   assert.throws(() => parseTlv(hex("010005003412")), NdpProtocolError);
   assert.throws(() => parseTlv(hex("01000200341201")), NdpProtocolError);
+});
+
+test("traversal (spec §11.1) agrees with the reference", () => {
+  const cfgs = Object.fromEntries(
+    Object.entries(V.policy_configs as Record<string, any>).map(([k, c]) => [
+      k, makePolicy({ readRoots: c.read_roots, writeRoots: c.write_roots, neverRead: c.never_read, neverWrite: c.never_write }),
+    ]),
+  );
+  assert.ok(V.traverse.length > 40);
+  for (const e of V.traverse) {
+    assert.equal(isTraversable(cfgs[e.config]!, e.path), e.traversable, `${e.config} ${e.path}`);
+    assert.equal(isChildVisible(cfgs[e.config]!, e.path), e.visible, `${e.config} ${e.path}`);
+  }
 });
