@@ -2,7 +2,7 @@
 
 Torna um Nintendo 3DS com CFW um target remoto de desenvolvimento controlável por agentes de IA (Codex, Claude Code) via MCP. Arquitetura pensada para expandir a DSi e Switch.
 
-**Status:** M0–M6 concluídos (agente 3DS com leitura/escrita/lixeira, CLI `ndev` e **servidor MCP**), validados no New 3DS, inclusive com um modelo real usando as ferramentas MCP. **Pareamento + HMAC por frame (agente v0.5.0)** implementado e testado no Mac (incl. adulteração, replay e testes de mutação); **falta validar no console** (`docs/hardware-test-checklist.md`, seção M5 parte 2). O primeiro uso exige que a pessoa pareie o computador (`ndev pair <ip>`, código na tela do console).
+**Status:** M0–M6 concluídos (agente 3DS com leitura/escrita/lixeira, CLI `ndev` e **servidor MCP**), validados no New 3DS, inclusive com um modelo real usando as ferramentas MCP. **Pareamento + HMAC por frame (v0.5.0)** validado no console. **Pastas escolhidas pelo dono no próprio 3DS (v0.6.0)** — o agente abre só com a própria pasta liberada e a pessoa libera o resto no console (botão A) — implementado e testado no Mac (incl. testes de mutação); **falta validar no console** (`docs/hardware-test-checklist.md`, seção M5 parte 3).
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — arquitetura, segurança, roadmap
 - [`docs/protocol/ndp-v1.md`](docs/protocol/ndp-v1.md) — especificação do protocolo NDP v1
