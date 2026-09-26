@@ -124,10 +124,16 @@
     }
 
     #exclusive(fn) {
+      this.queued = (this.queued || 0) + 1;
       const r = this.chain.then(fn, fn);
+      const dec = () => { this.queued--; };
+      r.then(dec, dec);
       this.chain = r.catch(() => undefined);
       return r;
     }
+
+    /** True while any operation is queued or running. */
+    get busy() { return (this.queued || 0) > 0; }
 
     #remoteError(f) {
       const t = C.parseTlv(f.payload);

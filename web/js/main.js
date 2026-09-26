@@ -1,1 +1,168 @@
-document.getElementById('app').textContent += ' — loaded';
+/* Bootstrap: preferences, the page frame (top bar, tabs, banners), the pairing screen, and wiring the session to the
+ * three views (Files, Settings, FAQ). */
+(function () {
+  "use strict";
+  const NDP = (globalThis.NDP = globalThis.NDP || {});
+  const { h, fill, icon, toast } = NDP.ui;
+  const S = NDP.session;
+  const t = (...a) => NDP.i18n.t(...a);
+
+  // ---------------------------------------------------------------------------------------------- preferences
+  const PREFS_KEY = "ndev.prefs";
+  const DEFAULTS = { showHidden: false, confirmDelete: true, backupOnSave: true, theme: "auto" };
+  const prefs = Object.assign({}, DEFAULTS);
+  try { const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}"); for (const k of Object.keys(DEFAULTS)) if (typeof saved[k] === typeof DEFAULTS[k]) prefs[k] = saved[k]; } catch (_) { /* defaults */ }
+  Object.defineProperty(prefs, "set", {
+    value(k, v) {
+      if (!(k in DEFAULTS)) return;
+      prefs[k] = v;
+      try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (_) { /* not persisted */ }
+      if (k === "showHidden" && NDP.files) NDP.files.render();
+    },
+  });
+  NDP.prefs = prefs;
+
+  function applyTheme() {
+    if (prefs.theme === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", prefs.theme);
+  }
+
+  // ---------------------------------------------------------------------------------------------- frame
+  const TABS = ["files", "settings", "faq"];
+  let tab = "files", app, views = {}, tabButtons = {}, statusPill, banner, tabsNav, retryTimer = null, everReady = false, langBtn;
+  try { const saved = sessionStorage.getItem("ndev.tab"); if (TABS.includes(saved)) tab = saved; } catch (_) { /* first tab */ }
+
+  function show(name) {
+    if (!TABS.includes(name)) return;
+    tab = name;
+    try { sessionStorage.setItem("ndev.tab", name); } catch (_) { /* fine */ }
+    layout();
+    if (name === "settings") NDP.settings.render();
+  }
+
+  function guessLabel() {
+    const ua = navigator.userAgent || "";
+    const b = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
+    const os = /Windows/.test(ua) ? "Win" : /Mac OS/.test(ua) ? "Mac" : /Android/.test(ua) ? "Android" : /iPhone|iPad/.test(ua) ? "iOS" : /Linux/.test(ua) ? "Linux" : "";
+    return `${b}${os ? " " + os : ""}`.slice(0, 15);
+  }
+
+  // ---------------------------------------------------------------------------------------------- pairing view
+  function pairingView() {
+    const code = h("input", { type: "text", inputMode: "text", autocomplete: "off", autocapitalize: "characters", spellcheck: false, placeholder: "XXXX-XXXX-XXXX-XXXX", maxLength: 24, "aria-label": t("pairCode") });
+    const label = h("input", { type: "text", value: guessLabel(), maxLength: 15, autocomplete: "off", spellcheck: false, "aria-label": t("pairLabel") });
+    const remember = h("input", { type: "checkbox", checked: true });
+    const err = h("div.field-error", { role: "alert" });
+    const btn = h("button.primary", { type: "submit", text: t("pair") });
+    const rejected = S.error === "rejected";
+    const form = h("form.pair-card", { onsubmit: async (e) => {
+      e.preventDefault();
+      err.textContent = "";
+      btn.disabled = true;
+      try {
+        await S.pair(code.value, label.value.trim() || guessLabel(), remember.checked);
+      } catch (ex) {
+        const key = ex.statusName ? "err." + ex.statusName : null;
+        err.textContent = ex.statusName === "BAD_REQUEST" && ex.detail === "code" ? t("pairBadCode") : (key && NDP.i18n.has(key) ? t(key) : ex.message) + " " + t("pairFailedHint");
+        btn.disabled = false;
+        if (S.client && S.client.isClosed) S.connect(); // a failed attempt burns the connection: get a fresh one for the next try
+      }
+    } },
+      h("h2", { text: t("pairTitle") }),
+      rejected ? h("div.banner.warn", null, icon("warn"), h("p", { text: t("pairRejected") })) : null,
+      h("ol.steps", null, h("li", { text: t("pairStep1") }), h("li", { text: t("pairStep2") }), h("li", { text: t("pairStep3") })),
+      h("label.field", null, h("span", { text: t("pairCode") }), code),
+      h("label.field", null, h("span", { text: t("pairLabel") }), label, h("span.muted.small", { text: t("pairLabelHint") })),
+      h("label.check", null, remember, h("span", { text: t("pairRemember") })),
+      err, h("div.actions", null, btn),
+      h("p.muted.small", { text: t("pairWhy") }));
+    if (S.info && !S.info.pairingOpen) form.insertBefore(h("div.banner.info", null, icon("help"), h("p", { text: t("pairWindowClosed") })), form.children[1]);
+    setTimeout(() => code.focus(), 0);
+    return form;
+  }
+
+  function stateView() {
+    if (S.state === "pairing") return pairingView();
+    if (S.state === "connecting") return h("div.center", null, h("div.spinner"), h("p", { text: t("connecting") }));
+    if (S.state === "offline" && !everReady) {
+      return h("div.center", null, icon("warn"), h("h2", { text: t("cannotReach") }), h("p", { text: t("cannotReachBody") }),
+        h("div.actions", null, h("button.primary", { onclick: () => S.connect(), text: t("retryNow") })));
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------------------------- layout
+  function layout() {
+    if (!app) return;
+    const ready = S.state === "ready";
+    const blocking = stateView();
+    if (S.state === "ready") everReady = true;
+
+    statusPill.className = "pill " + (ready ? "ok" : S.state === "offline" ? "bad" : "warn");
+    statusPill.textContent = t("state." + S.state);
+    for (const n of TABS) { tabButtons[n].classList.toggle("active", n === tab); tabButtons[n].setAttribute("aria-current", n === tab ? "page" : "false"); }
+    tabsNav.hidden = !!blocking;
+
+    banner.replaceChildren();
+    if (S.state === "offline" && everReady) {
+      banner.append(h("div.banner.error", null, icon("warn"), h("p.grow", { text: t("connectionLost") }), h("button", { onclick: () => S.connect(), text: t("retryNow") })));
+    }
+
+    let gate = views.gate;
+    if (blocking) { fill(gate, blocking); }
+    gate.hidden = !blocking;
+    for (const n of TABS) views[n].hidden = !!blocking || n !== tab;
+    document.title = ready ? `${t("appName")} · ${location.hostname}` : t("appName");
+  }
+
+  function buildFrame() {
+    statusPill = h("button.pill.warn", { onclick: () => show("settings"), title: t("connection") });
+    tabButtons = {};
+    tabsNav = h("nav.tabs", { "aria-label": "sections" }, TABS.map((n) => (tabButtons[n] = h("button.tab", { onclick: () => show(n) }, icon(n === "files" ? "folder" : n === "settings" ? "gear" : "help"), h("span", { text: t(n) })))));
+    langBtn = h("button.icon-btn.lang", { title: t("language"), onclick: () => { NDP.i18n.setLang(NDP.i18n.lang() === "pt-BR" ? "en" : "pt-BR"); rerender(); }, text: NDP.i18n.lang() === "pt-BR" ? "EN" : "PT" });
+    banner = h("div#banner");
+    views = { gate: h("section#view-gate"), files: h("section#view-files"), settings: h("section#view-settings"), faq: h("section#view-faq") };
+    fill(app, 
+      h("header.topbar", null, h("div.brand", null, icon("console"), h("span", { text: t("appName") })), tabsNav, h("span.grow"), statusPill, langBtn),
+      banner, h("main", null, views.gate, views.files, views.settings, views.faq));
+    NDP.files.mount(views.files);
+    NDP.settings.mount(views.settings);
+    NDP.faq.mount(views.faq);
+  }
+
+  function rerender() {
+    document.documentElement.lang = NDP.i18n.lang();
+    buildFrame();
+    NDP.files.render();
+    layout();
+  }
+
+  function boot() {
+    app = document.getElementById("app");
+    applyTheme();
+    document.documentElement.lang = NDP.i18n.lang();
+    buildFrame();
+    layout();
+    let filesStarted = false;
+    S.on("state", (state) => {
+      layout();
+      if (state === "ready") {
+        if (!filesStarted) { filesStarted = true; NDP.files.start(); } else NDP.files.refresh();
+      }
+    });
+    S.on("retry", (ms) => {
+      if (retryTimer) clearInterval(retryTimer);
+      let left = Math.ceil(ms / 1000);
+      const label = () => { const p = banner.querySelector(".banner p"); if (p && S.state === "offline") p.textContent = `${t("connectionLost")} ${t("retryingIn", left)}`; };
+      label();
+      retryTimer = setInterval(() => { left--; if (left <= 0 || S.state !== "offline") { clearInterval(retryTimer); return; } label(); }, 1000);
+    });
+    S.on("context", () => { layout(); NDP.files.render(); });
+    window.addEventListener("error", (e) => toast(String(e.message || e), "error", 8000));
+    window.addEventListener("unhandledrejection", (e) => { console.error(e.reason); });
+    S.connect();
+  }
+
+  NDP.main = { show, rerender, applyTheme, boot };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();

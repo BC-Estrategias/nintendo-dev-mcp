@@ -2,4 +2,12 @@ sha256.js
 codec.js
 auth.js
 client.js
+util.js
+i18n.js
+ui.js
+session.js
+viewer.js
+files.js
+settings.js
+faq.js
 main.js
