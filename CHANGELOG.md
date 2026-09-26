@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+- Two browser tabs (or two browsers) no longer fight over the console: the console has one page connection, and the page that gets replaced is told (WebSocket close 4001) and shows "opened somewhere else" with a *Use this tab* button, instead of reconnecting and evicting the other one every few seconds.
+- 1.2.0 was a test build that was never published; everything below shipped first in 1.2.1.
+
 ## 1.2.0
 - **Web page served by the console.** The 3DS app now serves a file manager on port 8080 (address on the top screen; **R** turns it off/on): browse the SD card, view images, edit text files (atomic save, optional `.bak`), **drag and drop** files and folders to upload (SHA-256 checked by the console, conflict handling), download, rename/move, move to the trash and restore, plus Settings (device, SD and memory, opened folders, pairing, preferences) and an FAQ with the local MCP install steps. Portuguese and English. Same pairing, same modes and same folders as the CLI: the page cannot change any of them.
 - New command `FS_RENAME` (0x0032): move/rename without ever overwriting (also `ndev mv` and the MCP tool `nintendo_fs_move`).

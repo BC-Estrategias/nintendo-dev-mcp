@@ -510,7 +510,14 @@ static int upgrade_to_ws(ndp_server *s, ndp_http_conn *h, const ndp_http_req *r,
   n = snprintf(resp, sizeof resp, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", acc);
   if (n <= 0 || (size_t)n >= sizeof resp) { http_error(h, 500, "Internal Server Error"); return 0; }
   if (send(h->fd, resp, (size_t)n, 0) != n) { close_http(s, h); return 1; } /* a fresh socket takes 130 bytes at once */
-  if (webc(s)->fd >= 0) close_conn(s, webc(s), "replaced by a new page connection");
+  if (webc(s)->fd >= 0) {
+    /* Tell the page it was replaced (WebSocket close 4001) so it stops instead of taking the connection back: two tabs
+     * would otherwise evict each other forever. Only when no frame is half-sent (a close frame must not split it). */
+    static const uint8_t close_replaced[4] = {0x88, 0x02, 0x0F, 0xA1};
+    ndp_conn *old = webc(s);
+    if (old->out_off >= old->out_len && old->ctl_len == 0) (void)send(old->fd, close_replaced, sizeof close_replaced, 0);
+    close_conn(s, old, "replaced by a new page connection");
+  }
   {
     int fd = h->fd;
     char peer[24];

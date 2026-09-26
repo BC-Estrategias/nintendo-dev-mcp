@@ -111,7 +111,7 @@ test("i18n: every key the page uses exists (static t(\"…\") calls and the dyna
     for (const m of src.matchAll(/"(name\.[a-z]+)"/g)) used.add(m[1]!);
   }
   // families built at run time
-  for (const s of ["connecting", "pairing", "ready", "offline"]) used.add(`state.${s}`);
+  for (const s of ["connecting", "pairing", "ready", "offline", "replaced"]) used.add(`state.${s}`);
   for (const m of ["READ_ONLY", "DEVELOPMENT"]) used.add(`mode.${m}`);
   const codec = readFileSync(WEB + "codec.js", "utf8");
   const statuses = /const Status = \{([^}]*)\}/s.exec(codec)![1]!.matchAll(/([A-Z_]+):/g);

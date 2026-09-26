@@ -7,7 +7,7 @@ AI agent ⇄ MCP (stdio) ⇄ ndev bridge (your computer) ⇄ NDP v1 over TCP/Wi-
 Browser ⇄ the same page, served by the 3DS app on port 8080 (NDP over WebSocket) ⇄ ┘
 ```
 
-**Status (v1.2.0):** usable and tested on a New 3DS with Luma3DS 13.3.3 — read/write/delete-to-trash on the SD card, pairing with per-frame HMAC, folders chosen on the console, CLI, MCP server and a **web file manager served by the console itself**. Design notes and dead ends (3GX plugin inside a game, replacing the Game Notes applet) are in [`docs/research/`](docs/research).
+**Status (v1.2.1):** usable and tested on a New 3DS with Luma3DS 13.3.3 — read/write/delete-to-trash on the SD card, pairing with per-frame HMAC, folders chosen on the console, CLI, MCP server and a **web file manager served by the console itself**. Design notes and dead ends (3GX plugin inside a game, replacing the Game Notes applet) are in [`docs/research/`](docs/research).
 
 > This drives **real hardware**. Writes modify a real SD card. Read the safety model below before you enable them.
 

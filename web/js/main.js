@@ -83,6 +83,10 @@
 
   function stateView() {
     if (S.state === "pairing") return pairingView();
+    if (S.state === "replaced") {
+      return h("div.center", null, icon("warn"), h("h2", { text: t("replacedTitle") }), h("p", { text: t("replacedBody") }),
+        h("div.actions", null, h("button.primary", { onclick: () => S.connect(), text: t("useHere") })));
+    }
     if (S.state === "connecting") return h("div.center", null, h("div.spinner"), h("p", { text: t("connecting") }));
     if (S.state === "offline" && !everReady) {
       return h("div.center", null, icon("warn"), h("h2", { text: t("cannotReach") }), h("p", { text: t("cannotReachBody") }),
@@ -98,7 +102,7 @@
     const blocking = stateView();
     if (S.state === "ready") everReady = true;
 
-    statusPill.className = "pill " + (ready ? "ok" : S.state === "offline" ? "bad" : "warn");
+    statusPill.className = "pill " + (ready ? "ok" : S.state === "offline" || S.state === "replaced" ? "bad" : "warn");
     statusPill.textContent = t("state." + S.state);
     for (const n of TABS) { tabButtons[n].classList.toggle("active", n === tab); tabButtons[n].setAttribute("aria-current", n === tab ? "page" : "false"); }
     tabsNav.hidden = !!blocking;

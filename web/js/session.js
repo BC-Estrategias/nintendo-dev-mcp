@@ -40,7 +40,7 @@
   const emit = (ev, ...a) => { for (const fn of listeners[ev] || []) { try { fn(...a); } catch (e) { console.error(e); } } };
 
   const S = {
-    state: "connecting", // connecting | pairing | ready | offline
+    state: "connecting", // connecting | pairing | ready | offline | replaced
     client: null, info: null, access: null, device: null, error: null, lastPingMs: null, deviceHex: null,
     url: () => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`,
     on, store,
@@ -82,7 +82,13 @@
         await c.open();
         S.info = await c.hello();
         S.deviceHex = S.info.deviceId ? C.hex(S.info.deviceId) : "console";
-        c.onclose = () => { if (S.client === c && S.state !== "offline") { setState("offline", null); scheduleReconnect(); } };
+        c.onclose = () => {
+          if (S.client !== c || S.state === "offline" || S.state === "replaced") return;
+          clearInterval(pingTimer);
+          if (c.replaced) { setState("replaced", null); return; } // another page took the console: do not fight for it
+          setState("offline", null);
+          scheduleReconnect();
+        };
         if (S.info.auth === "required") {
           const k = store.read()[S.deviceHex];
           if (!k) { setState("pairing"); return; }

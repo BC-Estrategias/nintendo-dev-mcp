@@ -40,7 +40,8 @@
     // connection
     connecting: "Conectando ao console…", cannotReach: "Não consegui falar com o console", cannotReachBody: "Confira se o app Nintendo Dev Agent está aberto no 3DS, se o computador está na mesma rede Wi-Fi e se este endereço é o que aparece na tela de cima do console (o IP muda quando o console reconecta).",
     retryNow: "Tentar agora", connectionLost: "Conexão perdida.", retryingIn: "Nova tentativa em {0} s.",
-    "state.connecting": "Conectando", "state.pairing": "Precisa parear", "state.ready": "Conectado", "state.offline": "Sem conexão",
+    "state.connecting": "Conectando", "state.pairing": "Precisa parear", "state.ready": "Conectado", "state.offline": "Sem conexão", "state.replaced": "Em outra aba",
+    replacedTitle: "A página foi aberta em outro lugar", replacedBody: "O console atende uma página por vez, e outra aba ou navegador assumiu a conexão. Feche a outra ou use esta.", useHere: "Usar esta aba",
     "mode.READ_ONLY": "Somente leitura", "mode.DEVELOPMENT": "Desenvolvimento",
     // pairing
     pairTitle: "Parear este navegador", pair: "Parear", pairStep1: "No 3DS, aperte Y: o console mostra um código na tela de CIMA (vale por 2 minutos e só funciona uma vez).", pairStep2: "Digite o código abaixo e dê um nome a este navegador.", pairStep3: "Pronto: o console passa a aceitar este navegador.",
@@ -120,7 +121,8 @@
     "name.tilde": "Avoid “~” followed by a digit in the name (the SD card confuses it with short names).", "name.long": "Name too long (255 bytes at most).",
     connecting: "Connecting to the console…", cannotReach: "Could not reach the console", cannotReachBody: "Check that the Nintendo Dev Agent app is open on the 3DS, that this computer is on the same Wi-Fi network, and that this address is the one on the console's top screen (the IP changes when the console reconnects).",
     retryNow: "Try now", connectionLost: "Connection lost.", retryingIn: "Retrying in {0} s.",
-    "state.connecting": "Connecting", "state.pairing": "Needs pairing", "state.ready": "Connected", "state.offline": "Offline",
+    "state.connecting": "Connecting", "state.pairing": "Needs pairing", "state.ready": "Connected", "state.offline": "Offline", "state.replaced": "In another tab",
+    replacedTitle: "The page was opened somewhere else", replacedBody: "The console serves one page at a time, and another tab or browser took over the connection. Close the other one or use this one.", useHere: "Use this tab",
     "mode.READ_ONLY": "Read-only", "mode.DEVELOPMENT": "Development",
     pairTitle: "Pair this browser", pair: "Pair", pairStep1: "On the 3DS, press Y: the console shows a code on the TOP screen (valid for 2 minutes, works once).", pairStep2: "Type the code below and give this browser a name.", pairStep3: "Done: the console starts accepting this browser.",
     pairCode: "Code from the console", pairLabel: "Name of this browser", pairLabelHint: "Up to 15 characters. Only to help you remember what was paired.", pairRemember: "Remember on this browser (stores the key here)", pairBadCode: "That code does not look right: it has 16 characters, like XXXX-XXXX-XXXX-XXXX.",

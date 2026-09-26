@@ -170,8 +170,8 @@ Esperado: `model` (o seu New 3DS/XL), `firmware` (ex.: `11.17.0-50U`), `RAM 256.
 **Resultado real (New 3DS XL, v1.1.0, 2026-09-25, 0,18 s):** `New Nintendo 3DS XL`, `11.17.0-50U`, RAM 256 MiB, sys mem 79.7 de 100 MiB, SD 21.85 de 59.45 GiB. A linha "app mem" saiu como `0.0 free of 64.0` (enganosa) e foi removida na v1.1.1.
 
 
-## v1.2.0 — página web servida pelo console
-Pré-requisitos: v1.2.0 instalada (CIA/3dsx), console na mesma rede do computador. A tela de cima mostra `Page   : http://<ip>:8080` e `Browser: not connected`.
+## v1.2.x — página web servida pelo console
+Pré-requisitos: v1.2.1 (ou mais nova) instalada (CIA/3dsx), console na mesma rede do computador. A tela de cima mostra `Page   : http://<ip>:8080` e `Browser: not connected`.
 1. No computador, abra `http://<ip>:8080`. **Anote** se a página carrega, quanto tempo leva (gzip ~47 KB) e se o Chrome/Safari mostra a tela "Parear este navegador".
 2. **Y** no console → digite o código na página, dê um nome, pareie. A tela de cima deve mostrar `Browser: CONNECTED <ip do computador>`. Recarregue a página: deve entrar sem pedir código de novo.
 3. Aba **Arquivos**: navegue até `/3ds/nintendo-dev-agent`. Em `READ_ONLY` os botões de escrita ficam desativados e há o aviso "modo somente leitura". Aperte **X** no console (DEVELOPMENT): a página deve permitir escrever **sem recarregar**? (o modo é lido na conexão; se não atualizar, recarregue e anote).

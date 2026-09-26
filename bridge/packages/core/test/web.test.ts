@@ -310,6 +310,7 @@ suite("the console web page (HTTP + WebSocket)", () => {
     const ws2 = (await Ws.open(web)) as Ws;
     await ws1.waitClosed();
     assert.equal(ws1.closed, true, "the older page connection was closed");
+    assert.equal(ws1.frames.find((x) => x.opcode === 8)?.payload.readUInt16BE(0), 4001, "and told it was replaced, so it does not fight back");
     ws2.send(2, helloFrame(1));
     await ws2.waitFrames(1);
     assert.equal(ndpFrames(ws2).length, 1);

@@ -38,7 +38,12 @@
         const timer = setTimeout(() => { try { ws.close(); } catch (_) { /* ignore */ } reject(new NdpTransportError("could not connect (timeout)")); }, timeoutMs);
         ws.onopen = () => { clearTimeout(timer); resolve(this); };
         ws.onerror = () => { clearTimeout(timer); this.#fail(new NdpTransportError("connection error")); reject(new NdpTransportError("could not connect to the console")); };
-        ws.onclose = () => { clearTimeout(timer); this.#fail(new NdpTransportError("connection closed")); if (this.onclose) this.onclose(); };
+        ws.onclose = (ev) => {
+          clearTimeout(timer);
+          this.replaced = !!ev && ev.code === 4001; // the console gave the connection to another page
+          this.#fail(new NdpTransportError(this.replaced ? "connection taken over by another page" : "connection closed"));
+          if (this.onclose) this.onclose();
+        };
         ws.onmessage = (ev) => this.#onMessage(new Uint8Array(ev.data));
       });
     }
