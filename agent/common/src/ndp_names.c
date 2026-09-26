@@ -9,6 +9,8 @@ const char *ndp_command_name(uint16_t command) {
     case NDP_CMD_PAIR_REVEAL: return "PAIR_REVEAL";
     case NDP_CMD_PAIR_POLL: return "PAIR_POLL";
     case NDP_CMD_AUTH: return "AUTH";
+    case NDP_CMD_DEVICE_INFO: return "DEVICE_INFO";
+    case NDP_CMD_ACCESS_INFO: return "ACCESS_INFO";
     case NDP_CMD_FS_LIST: return "FS_LIST";
     case NDP_CMD_FS_STAT: return "FS_STAT";
     case NDP_CMD_FS_READ: return "FS_READ";
