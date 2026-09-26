@@ -2,7 +2,7 @@
 
 ## Threat model
 The console and the computer are on the same LAN. The agent defends against **other devices on that LAN** and against an **assistant that only has the MCP tools**:
-- nobody can read or write the SD card without having been paired by a person at the console (80-bit one-time code shown on the console; per-frame HMAC-SHA-256 with counters, so tampering and replay close the connection);
+- nobody can read or write the SD card without having been paired by a person at the console (the person presses A on the console after comparing a 6-digit number shown on both screens: an X25519 key agreement with a commitment, so the key never crosses the network and a man in the middle cannot fake a match; or the older 80-bit one-time code; then per-frame HMAC-SHA-256 with counters, so tampering and replay close the connection). Five refused requests close the pairing window;
 - nothing on the network can change the access mode, the opened folders or the pairings — those are changed with the console's buttons only;
 - protected system zones are never writable, and deletes only move items to a trash folder; permanent deletion (`FS_PURGE`) works only on what is already inside a trash, needs DEVELOPMENT mode, and is not available through the MCP server.
 

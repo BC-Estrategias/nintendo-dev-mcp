@@ -559,6 +559,125 @@ static void test_pair2(void) {
   }
 }
 
+/* ---- the agent's side of pairing by number comparison: owners, commitment, stages, one delivery ---- */
+static int p2_rng(void *ctx, uint8_t *out, size_t n) {
+  uint8_t *c = (uint8_t *)ctx;
+  size_t i;
+  for (i = 0; i < n; i++) out[i] = (uint8_t)(++*c * 37u + i);
+  return 0;
+}
+
+typedef struct { ndp_header h; uint8_t buf[512]; size_t len; } p2_resp;
+static uint8_t g_p2_out[NDP_HEADER_SIZE + 1024];
+static uint32_t g_p2_id = 100;
+static p2_resp p2_send(ndp_agent *a, uint16_t cmd, const uint8_t *pl, size_t len) {
+  ndp_header h;
+  p2_resp r;
+  size_t n;
+  memset(&h, 0, sizeof h);
+  h.version = 1; h.kind = NDP_KIND_REQ; h.request_id = ++g_p2_id; h.command = cmd; h.payload_len = (uint32_t)len;
+  n = ndp_agent_handle(a, &h, pl, g_p2_out, sizeof g_p2_out);
+  memset(&r, 0, sizeof r);
+  if (n >= NDP_HEADER_SIZE && ndp_header_decode(g_p2_out, &r.h) == NDP_OK) {
+    r.len = r.h.payload_len < sizeof r.buf ? r.h.payload_len : sizeof r.buf;
+    memcpy(r.buf, g_p2_out + NDP_HEADER_SIZE, r.len);
+  } else r.h.status = 0xFFFF; /* closed / no reply */
+  return r;
+}
+static int p2_tlv(uint8_t *buf, size_t cap, uint16_t t1, const void *v1, size_t l1, uint16_t t2, const void *v2, size_t l2) {
+  ndp_tlv_w w;
+  ndp_tlv_w_init(&w, buf, cap);
+  if (l1 || v1) ndp_tlv_put(&w, t1, v1, l1);
+  if (l2 || v2) ndp_tlv_put(&w, t2, v2, l2);
+  return (int)w.len;
+}
+static const uint8_t *p2_find(const p2_resp *r, uint16_t tag, size_t want) {
+  const uint8_t *v; size_t l;
+  return ndp_tlv_find(r->buf, r->len, tag, &v, &l) && l == want ? v : NULL;
+}
+
+static void test_pair2_agent(void) {
+  ndp_keystore ks;
+  ndp_pairing pw;
+  ndp_agent_config cfg;
+  ndp_agent a1, a2;
+  uint8_t rng = 7, pl[256], hello[128], sec_b[32], pub_b[32], nonce_b[16], commit[32], shared[32], zero32[32] = {0};
+  const uint8_t *pub_c, *nonce_c, *st;
+  const char *lab = "Test";
+  ndp_pair2_keys k;
+  p2_resp r;
+  int n;
+  memset(&ks, 0, sizeof ks);
+  memset(&pw, 0, sizeof pw);
+  memset(&cfg, 0, sizeof cfg);
+  cfg.platform = "test"; cfg.agent_version = "t"; cfg.auth = "required"; cfg.max_frame = 65536;
+  cfg.random_bytes = p2_rng; cfg.random_ctx = &rng; cfg.keys = &ks; cfg.pairing = &pw;
+  ndp_agent_init(&a1, &cfg); a1.cfg.conn_id = 0; a1.cfg.peer = "10.0.0.1";
+  ndp_agent_init(&a2, &cfg); a2.cfg.conn_id = 1; a2.cfg.peer = "10.0.0.2";
+  { uint8_t nc[16] = {0}; uint16_t one = 1; ndp_tlv_w w; ndp_tlv_w_init(&w, hello, sizeof hello);
+    ndp_tlv_put_u16(&w, NDP_TAG_PROTOCOL, one); ndp_tlv_put_u16(&w, NDP_TAG_PROTOCOL_MAX, one); ndp_tlv_put(&w, NDP_TAG_NONCE, nc, 16);
+    CHECK(p2_send(&a1, NDP_CMD_HELLO, hello, w.len).h.status == 0 && p2_send(&a2, NDP_CMD_HELLO, hello, w.len).h.status == 0, "hello"); }
+  memset(sec_b, 0x42, 32); memset(nonce_b, 0x24, 16);
+  ndp_x25519_public(pub_b, sec_b);
+  ndp_pair2_commit(pub_b, nonce_b, commit);
+  n = p2_tlv(pl, sizeof pl, NDP_TAG_LABEL, lab, 4, NDP_TAG_PAIR_COMMIT, commit, 32);
+
+  CHECK(p2_send(&a1, NDP_CMD_PAIR_BEGIN, pl, (size_t)n).h.status == NDP_ST_UNAUTHORIZED, "no window: refused");
+  pw.active = 1; pw.expires_ms = 1u << 30;
+  r = p2_send(&a1, NDP_CMD_PAIR_BEGIN, pl, (size_t)n);
+  CHECK(r.h.status == 0 && p2_find(&r, NDP_TAG_PAIR_PUB, 32) && p2_find(&r, NDP_TAG_PAIR_NONCE, 16), "begin answers with the console's key");
+  pub_c = p2_find(&r, NDP_TAG_PAIR_PUB, 32); nonce_c = p2_find(&r, NDP_TAG_PAIR_NONCE, 16);
+  CHECK(pw.p2_stage == NDP_P2_COMMITTED && pw.p2_owner == 0 && strcmp(pw.p2_peer, "10.0.0.1") == 0 && strcmp(pw.p2_label, "Test") == 0, "request recorded with its owner and peer");
+  CHECK(p2_send(&a2, NDP_CMD_PAIR_BEGIN, pl, (size_t)n).h.status == NDP_ST_BUSY, "another connection cannot replace a waiting request");
+  CHECK(p2_send(&a2, NDP_CMD_PAIR_POLL, NULL, 0).h.status == NDP_ST_BAD_REQUEST, "nor poll it");
+  CHECK(p2_send(&a2, NDP_CMD_PAIR_REVEAL, pl, 0).h.status == NDP_ST_BAD_REQUEST, "nor reveal it");
+  /* a reveal that does not match the commitment: refused, request dropped, counted */
+  { uint8_t other[32]; memcpy(other, pub_b, 32); other[0] ^= 1;
+    n = p2_tlv(pl, sizeof pl, NDP_TAG_PAIR_PUB, other, 32, NDP_TAG_PAIR_NONCE, nonce_b, 16);
+    CHECK(p2_send(&a1, NDP_CMD_PAIR_REVEAL, pl, (size_t)n).h.status == NDP_ST_UNAUTHORIZED, "wrong commitment refused");
+    CHECK(pw.p2_stage == NDP_P2_IDLE && pw.p2_attempts == 1 && !memcmp(pw.p2_secret, zero32, 32), "and the secret is wiped"); }
+  /* the proper flow */
+  n = p2_tlv(pl, sizeof pl, NDP_TAG_LABEL, lab, 4, NDP_TAG_PAIR_COMMIT, commit, 32);
+  r = p2_send(&a1, NDP_CMD_PAIR_BEGIN, pl, (size_t)n);
+  pub_c = p2_find(&r, NDP_TAG_PAIR_PUB, 32); nonce_c = p2_find(&r, NDP_TAG_PAIR_NONCE, 16);
+  CHECK(pub_c && nonce_c, "second begin");
+  { uint8_t pc[32], nc[16]; memcpy(pc, pub_c, 32); memcpy(nc, nonce_c, 16);
+    n = p2_tlv(pl, sizeof pl, NDP_TAG_PAIR_PUB, pub_b, 32, NDP_TAG_PAIR_NONCE, nonce_b, 16);
+    CHECK(p2_send(&a1, NDP_CMD_PAIR_REVEAL, pl, (size_t)n).h.status == 0 && pw.p2_stage == NDP_P2_WAITING, "reveal moves to waiting");
+    CHECK(ndp_x25519(shared, sec_b, pc) == 0, "client side shared secret");
+    ndp_pair2_derive(shared, pub_b, pc, nonce_b, nc, (const uint8_t *)lab, 4, &k);
+    CHECK(pw.p2_sas == k.sas && memcmp(pw.p2_psk, k.psk, 32) == 0 && !memcmp(pw.p2_secret, zero32, 32), "console and client derive the same number and key");
+    st = NULL; r = p2_send(&a1, NDP_CMD_PAIR_POLL, NULL, 0);
+    st = p2_find(&r, NDP_TAG_PAIR_STATE, 1);
+    CHECK(r.h.status == 0 && st && st[0] == 0 && pw.p2_stage == NDP_P2_WAITING, "poll: still waiting for the person");
+    CHECK(p2_send(&a1, NDP_CMD_PAIR_REVEAL, pl, (size_t)n).h.status == NDP_ST_BAD_REQUEST, "no second reveal");
+    /* the platform approves (what ndp_server_pair2_decide does) */
+    CHECK(ndp_keystore_add(&ks, pw.p2_psk, pw.p2_label) == NDP_OK, "store");
+    pw.p2_stage = NDP_P2_APPROVED;
+    r = p2_send(&a1, NDP_CMD_PAIR_POLL, NULL, 0);
+    st = p2_find(&r, NDP_TAG_PAIR_STATE, 1);
+    { uint8_t proof[32]; ndp_pair2_ok_proof(k.psk, pub_b, pc, proof);
+      CHECK(st && st[0] == 1 && p2_find(&r, NDP_TAG_PROOF, 32) && !memcmp(p2_find(&r, NDP_TAG_PROOF, 32), proof, 32) && !memcmp(p2_find(&r, NDP_TAG_KEY_ID, 4), k.key_id, 4), "approved: key id and proof delivered"); }
+    CHECK(pw.p2_stage == NDP_P2_IDLE && !memcmp(pw.p2_psk, zero32, 32), "delivered once and wiped");
+    CHECK(p2_send(&a1, NDP_CMD_PAIR_POLL, NULL, 0).h.status == NDP_ST_BAD_REQUEST, "nothing to poll afterwards"); }
+  /* denied / store full states */
+  pw.p2_stage = NDP_P2_DENIED; pw.p2_owner = 0;
+  r = p2_send(&a1, NDP_CMD_PAIR_POLL, NULL, 0); st = p2_find(&r, NDP_TAG_PAIR_STATE, 1);
+  CHECK(st && st[0] == 2 && pw.p2_stage == NDP_P2_IDLE, "denied is reported once");
+  pw.p2_stage = NDP_P2_FULL; pw.p2_owner = 0;
+  r = p2_send(&a1, NDP_CMD_PAIR_POLL, NULL, 0); st = p2_find(&r, NDP_TAG_PAIR_STATE, 1);
+  CHECK(st && st[0] == 3, "store full is reported");
+  /* label limits, missing fields, too many attempts */
+  { uint8_t big[16]; memset(big, 'x', sizeof big);
+    n = p2_tlv(pl, sizeof pl, NDP_TAG_LABEL, big, 16, NDP_TAG_PAIR_COMMIT, commit, 32);
+    CHECK(p2_send(&a1, NDP_CMD_PAIR_BEGIN, pl, (size_t)n).h.status == NDP_ST_BAD_REQUEST, "label of 16 bytes refused");
+    n = p2_tlv(pl, sizeof pl, NDP_TAG_LABEL, big, 15, NDP_TAG_PAIR_COMMIT, commit, 31);
+    CHECK(p2_send(&a1, NDP_CMD_PAIR_BEGIN, pl, (size_t)n).h.status == NDP_ST_BAD_REQUEST, "commit of 31 bytes refused"); }
+  pw.active = 1; pw.p2_attempts = NDP_P2_MAX_ATTEMPTS;
+  n = p2_tlv(pl, sizeof pl, NDP_TAG_LABEL, lab, 4, NDP_TAG_PAIR_COMMIT, commit, 32);
+  CHECK(p2_send(&a1, NDP_CMD_PAIR_BEGIN, pl, (size_t)n).h.status == NDP_ST_UNAUTHORIZED && pw.active == 0, "too many attempts close the window");
+}
+
 static void test_web(void) {
   int i, chunk, j;
   static const int chunks[] = {1, 2, 3, 7, 64, 100000};
@@ -735,6 +854,7 @@ int main(void) {
   test_auth_dialogues();
   test_web();
   test_pair2();
+  test_pair2_agent();
   printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

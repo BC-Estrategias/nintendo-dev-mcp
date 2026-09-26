@@ -197,3 +197,10 @@ Pré-requisitos: v1.3.0 (ou mais nova) instalada (CIA/3dsx), console na mesma re
 5. O botão **Lixeira** da barra abre a lixeira da pasta liberada em que você está.
 6. No celular: um toque abre pastas; a caixinha seleciona.
 
+### v1.3.0 — pareamento por número
+1. Esqueça o navegador (Configurações → Esquecer este navegador) e recarregue a página. Aperte **Y** no console (a tela de cima mostra "PAIRING OPEN … Older way, the code").
+2. Na página clique **Parear**: a página mostra um número de 6 dígitos e o console mostra **PAIRING REQUEST**, o endereço do computador, o nome e o **mesmo número**. Aperte **A**: a página entra. **Anote** quanto tempo levou e se os números coincidiram.
+3. Repita e aperte **B**: a página deve dizer que o console recusou. Repita sem apertar nada por 1 minuto: deve expirar.
+4. `ndev pair <ip>` (aperte Y antes): mostra o número; aperte A. `ndev pair <ip> --code` ainda funciona com o código.
+5. Aperte Y de novo **sem** pedir pareamento e recarregue a página: nada deve mudar. Depois do pareamento, confira que a janela fechou (não dá para parear de novo sem apertar Y).
+

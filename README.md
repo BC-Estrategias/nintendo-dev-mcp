@@ -21,7 +21,7 @@ Browser ⇄ the same page, served by the 3DS app on port 8080 (NDP over WebSocke
 - **Starts READ_ONLY.** Press **X** on the console to allow writes (DEVELOPMENT mode). No network command can change the mode.
 - **You choose the folders**, on the console: press **A** → *Access folders* → **Y** cycles closed → read → read+write. By default only `/3ds/nintendo-dev-agent` is open. No network command can change this list.
 - **Protected system zones are never writable**, even if you open `/`: `/Nintendo 3DS`, `/luma` (except `/luma/plugins` and `/luma/titles`), `/boot.firm`, `/gm9`, `/private`, and the agent's own config.
-- **Pairing required.** Press **Y** on the console, then type the code it shows in `ndev pair <ip>`. The code never crosses the network; every frame after login is authenticated with HMAC-SHA-256 (integrity and authenticity, **not encryption** — file contents are visible on your LAN). The MCP server has **no** pairing tool, so an assistant cannot pair itself.
+- **Pairing required.** Press **Y** on the console, start the pairing (the page's **Pair** button or `ndev pair <ip>`), and press **A** on the console when it shows the same 6-digit number as the other side (an X25519 key agreement with a commitment, so nobody in the middle can fake a match; the older 16-character code still works). The key never crosses the network; every frame after login is authenticated with HMAC-SHA-256 (integrity and authenticity, **not encryption** — file contents are visible on your LAN). The MCP server has **no** pairing tool, so an assistant cannot pair itself.
 - **Deleting never destroys**: items are moved to `<write root>/.ndp-trash/`. Only a person can empty a trash (the page's *Delete forever* / *Empty trash*, or `ndev purge`); the MCP server has no such tool, and nothing outside a trash can be deleted for good. Writes are atomic (temp file → verify → rename) and never overwrite silently.
 - File contents returned to an assistant are treated as **untrusted data** (prompt-injection guidance is in the tool descriptions).
 - Everything is limited to the SD card. NAND is out of scope by design.
@@ -37,7 +37,8 @@ Requirements: a 3DS with Luma3DS and the Homebrew Launcher (or FBI to install a 
    ```bash
    node bridge/packages/cli/src/main.ts pair <console-ip>
    ```
-3b. **Or use the browser**: open the page address shown on the console, press **Y** on the console and type the code in the page (each browser pairs once).
+   It prints a **6-digit number**; the console shows the same number: press **A** on it (B refuses). Nothing to type, and the key never crosses the network.
+3b. **Or use the browser**: open the page address shown on the console, press **Y** on the console, click **Pair** on the page and press **A** on the console when it shows the same number (each browser pairs once).
 4. **Look around**: `node bridge/packages/cli/src/main.ts ls <console-ip> /3ds/nintendo-dev-agent`
 5. **Open more folders** on the console (A → Access folders) and **allow writes** (X) only when you need them.
 6. **Use it from an assistant** — see [`docs/mcp.md`](docs/mcp.md) for the Claude Code / Codex registration.

@@ -65,10 +65,23 @@ mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16
 (`header` já com o bit MAC ligado). O contador é **por direção**, começa em 0 no primeiro frame selado daquela direção (para o console→Bridge, é o `RES` do AUTH; para o Bridge→console, é o primeiro REQ depois do AUTH) e sobe 1 por frame. Frame sem MAC, MAC inválido ou contador fora de ordem ⇒ a conexão é **encerrada** sem resposta. O comprimento máximo do payload continua `max_frame`; o MAC (16 bytes) vem além dele.
 
 ### 4.6 Regras do console
-- `auth = "required"` (HELLO RES): antes do AUTH só são aceitos HELLO, PAIR (com a janela aberta) e AUTH; qualquer outro comando → `UNAUTHORIZED`. `auth = "none"` (somente testes/desenvolvimento): sem AUTH nem MAC.
+- `auth = "required"` (HELLO RES): antes do AUTH só são aceitos HELLO, PAIR, PAIR_BEGIN/REVEAL/POLL (todos com a janela aberta) e AUTH; qualquer outro comando → `UNAUTHORIZED`. `auth = "none"` (somente testes/desenvolvimento): sem AUTH nem MAC.
 - Com `auth = "required"` o HELLO RES traz também `device_id bytes16` (identificador estável do console, gerado no primeiro pareamento), `paired_keys u8` (quantos computadores) e `pairing_open u8`.
 - O nonce do console DEVE vir de um gerador seguro; se não houver, com `auth = "required"` o HELLO falha (`IO_ERROR`) — nunca usar nonce fraco.
 - Um HELLO **depois** do AUTH → `BAD_REQUEST` ("already authenticated"; abra uma nova conexão). Um frame com o bit MAC **antes** do AUTH encerra a conexão.
+
+### 4.8 Pareamento por comparação de número (agente ≥ 1.3.0)
+O jeito de parear **sem digitar o código**: o cliente e o console combinam uma chave por X25519, e a pessoa confere na tela dos dois um **número de 6 dígitos** e aperta **A** no console. A chave **nunca trafega**; quem só escuta a rede não ganha nada, e quem se põe no meio produz um número diferente. O pareamento por código (§4.1–4.3) continua valendo.
+Só com a **janela aberta** (tecla Y). Um pedido por vez. Todos os passos são REQ/RES normais, antes do AUTH, na mesma conexão.
+
+1. `PAIR_BEGIN {label (1–15 bytes), pair_commit bytes32}` → `RES {pair_pub bytes32, pair_nonce bytes16}`. O cliente **se compromete** antes de ver a chave do console: `pair_commit = SHA-256("NDP-PAIR2-COMMIT" ‖ pubB ‖ nonceB)` (`pubB` = X25519 público do cliente, `nonceB` = 16 bytes aleatórios). O console gera um segredo X25519 efêmero (`secC`), `pubC = X25519(secC, 9)` e `nonceC` (16 bytes) com o gerador seguro; sem gerador seguro → `IO_ERROR`. Outra conexão com pedido pendente → `BUSY`.
+2. `PAIR_REVEAL {pair_pub = pubB, pair_nonce = nonceB}` → `RES {}`. O console confere `SHA-256("NDP-PAIR2-COMMIT" ‖ pubB ‖ nonceB) == pair_commit`; diferente → `UNAUTHORIZED` e o pedido é descartado (**nunca** se mostra número para uma chave trocada depois de ver a do console: sem o compromisso, um atacante poderia gerar chaves até o número coincidir). Depois `shared = X25519(secC, pubB)`; resultado todo zero (ponto de ordem pequena) → `BAD_REQUEST`. O segredo `secC` é apagado.
+   `th = SHA-256("NDP-PAIR2-TH" ‖ pubB ‖ pubC ‖ nonceB ‖ nonceC ‖ len(label) u8 ‖ label)`; `k = HMAC(shared, th)`; **`sas = be32(HMAC(k, "sas")[0:4]) mod 10⁶`** (6 dígitos, mostrados `NNN NNN`); `PSK = HMAC(k, "psk")`; `key_id = SHA-256(PSK)[0:4]`. As duas pontas calculam o mesmo. O console mostra o número na tela de cima com o nome e o endereço de quem pediu; o cliente mostra o dele.
+3. `PAIR_POLL {}` (a cada ~0,5 s) → `RES {pair_state}`: `0` esperando a pessoa. Se ela aperta **A**: o console guarda `{key_id, PSK, label}`, fecha a janela (uso único) e o próximo POLL devolve `{pair_state = 1, key_id, proof}` **uma única vez**, com `proof = HMAC(PSK, "NDP-PAIR2-OK" ‖ pubB ‖ pubC)`: o cliente DEVE conferir `proof` e `key_id` (prova de que o console derivou a mesma chave) antes de guardar a `PSK`; diferente → abandonar. **B** (ou 60 s sem resposta) → `2`; chaveiro cheio → `3`. Cada recusa conta uma tentativa; **5 fecham a janela**.
+- O pedido pertence à conexão que o fez: outra conexão não consegue ler nem responder (`BAD_REQUEST`/`BUSY`), e fechar a conexão descarta o pedido.
+- O número **não** vai para o log do console.
+- Segurança do número: o atacante precisaria que o número dos dois lados coincidisse; com o compromisso, cada tentativa tem chance de 1 em 10⁶, e cada uma exige que a pessoa aperte A num número diferente (ela aperta B).
+Vetores: X25519 (RFC 7748 §5.2 e §6.1, pontos de ordem pequena) e derivações completas em `docs/protocol/test-vectors/` (`pair2`), gerados por uma implementação Python independente e verificados no C, no TypeScript (com `node:crypto`) e no JavaScript da página.
 
 ## 5. Comandos
 | ID | Nome | M0 | Descrição |
@@ -77,6 +90,7 @@ mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16
 | 0x0002 | PING | ✔ | eco de nonce |
 | 0x0004 | PAIR | M5 ✔ | pareamento (janela aberta no console) |
 | 0x0005 | AUTH | M5 ✔ | prova de posse da chave pareada |
+| 0x0006 / 0x0007 / 0x0008 | PAIR_BEGIN / PAIR_REVEAL / PAIR_POLL | ✔ (1.3.0) | pareamento por comparação de número (§4.8) |
 | 0x0010 | DEVICE_INFO | M2 ✔ | modelo, firmware, RAM, regiões de memória e capacidade do SD |
 | 0x0011 | ACCESS_INFO | M5 ✔ | modo e pastas que o dono liberou (só depois do AUTH) |
 | 0x0020 | FS_LIST | M3 ✔ | lista um diretório (paginado) |
@@ -169,6 +183,8 @@ ERR carrega, opcionalmente: `0x0001 detail` (str, texto humano curto, **informat
 | 0x0052 / 0x0053 | app_mem_total / app_mem_free | u64 | DEVICE_INFO RES: região de memória do app em primeiro plano (onde o próprio agente roda) |
 | 0x0054 / 0x0055 | sys_mem_total / sys_mem_free | u64 | DEVICE_INFO RES: região SYSTEM |
 | 0x0056 / 0x0057 | sd_total / sd_free | u64 | DEVICE_INFO RES: cartão SD, bytes |
+| 0x0060 / 0x0061 / 0x0062 | pair_commit / pair_pub / pair_nonce | bytes32 / bytes32 / bytes16 | PAIR_BEGIN REQ (commit) e RES (pub, nonce do console); PAIR_REVEAL REQ (pub, nonce do cliente) |
+| 0x0063 | pair_state | u8 | PAIR_POLL RES: 0 = esperando a pessoa, 1 = aprovado (traz `key_id` e `proof`), 2 = recusado/expirado, 3 = chaveiro cheio |
 | 0x0058 | new_path | str | FS_RENAME REQ (destino) e RES (destino normalizado) |
 | 0x0059 / 0x005A | purged / more | u32 / u8 | FS_PURGE RES: itens (arquivos e pastas) removidos por este pedido; `more` (também FS_COPY RES) = 1 se ainda resta trabalho |
 | 0x005B / 0x005C | copied / copy_mode | u64 / u8 | FS_COPY RES: bytes já copiados / REQ: 1 = começar (descarta um temporário antigo), 0 = continuar (padrão), 2 = descartar a cópia parcial |
