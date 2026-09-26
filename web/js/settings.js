@@ -36,6 +36,25 @@
       list.length ? h("ul", null, list.map((p) => h("li", null, h("code", { text: p }), h("button.link", { onclick: () => { NDP.main.show("files"); NDP.files.go(p); }, text: t("open") })))) : h("p.muted", { text: t(kind === "write" ? "noWriteFolders" : "noReadFolders") }));
   }
 
+  function pairedDevicesList(title, devices, currentDeviceHex) {
+    return h("div.paired-devices", null, h("h4", { text: title }),
+      devices.length ? h("ul", null, devices.map(({ hex, label, at, isCurrent }) =>
+        h("li.device-item", null,
+          h("div.device-info", null,
+            h("span.device-label", { text: label || "(unnamed)" }),
+            isCurrent ? h("span.pill.ok", { text: t("currentDevice") }) : null,
+            h("span.muted.small", { text: at ? new Date(at).toLocaleDateString() : "—" })),
+          h("button.link.danger", {
+            onclick: async () => {
+              if (await confirmBox(t("forgetDevice"), t("forgetDeviceBody", label || "(unnamed)"), t("forget"), true)) {
+                S.store.forget(hex);
+                render();
+              }
+            },
+            text: t("remove")
+          })))) : h("p.muted", { text: t("noPairedDevices") }));
+  }
+
   function render() {
     if (!root) return;
     const info = S.info, dev = S.device, acc = S.access;
@@ -73,6 +92,16 @@
       h("div.actions", null,
         paired ? h("button.danger", { onclick: async () => { if (await confirmBox(t("forgetThis"), t("forgetThisBody"), t("forgetThis"), true)) { await S.forgetThisBrowser(); NDP.main.show("files"); } } }, icon("trash"), t("forgetThis")) : null));
 
+    const allPairings = S.store.read();
+    const pairedDevices = Object.entries(allPairings).map(([hex, entry]) => ({
+      hex,
+      label: entry.label,
+      at: entry.at,
+      isCurrent: hex === S.deviceHex
+    })).sort((a, b) => (b.at || 0) - (a.at || 0));
+
+    const pairedDevicesCard = pairedDevices.length > 0 ? card(t("pairedDevices"), pairedDevicesList(t("allPairedDevices"), pairedDevices, S.deviceHex)) : null;
+
     const prefs = card(t("preferences"),
       pref(t("language"), null, h("select", { onchange: (e) => { NDP.i18n.setLang(e.target.value); NDP.main.rerender(); } }, [["auto", t("langAuto")], ["pt-BR", "Português (Brasil)"], ["en", "English"]].map(([v, l]) => h("option", { value: v, text: l, selected: NDP.i18n.choice() === v })))),
       pref(t("theme"), null, h("select", { onchange: (e) => { NDP.prefs.set("theme", e.target.value); NDP.main.applyTheme(); } }, [["auto", t("themeAuto")], ["light", t("themeLight")], ["dark", t("themeDark")]].map(([v, l]) => h("option", { value: v, text: l, selected: NDP.prefs.theme === v })))),
@@ -81,7 +110,7 @@
       pref(t("confirmDelete"), t("confirmDeleteHint"), toggle("confirmDelete")),
       pref(t("backupOnSave"), t("backupOnSaveHint"), toggle("backupOnSave")));
 
-    fill(root, h("div.cards", null, connection, consoleCard, folders, pairing, prefs));
+    fill(root, h("div.cards", null, connection, consoleCard, folders, pairing, pairedDevicesCard, prefs));
   }
 
   function mount(el) {

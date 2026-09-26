@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.4.0 — paired devices management
+- **View and remove paired devices** on the Settings page: a new card lists all devices that have been paired with this console (even if not currently connected), shows which one is the current browser, and includes a button to forget/remove any paired device. Forgotten pairings remain on the console until SELECT×2 is pressed there; this only removes them from this browser's storage.
+
 ## 1.3.0 — first release with the web page
 (1.2.0–1.2.2 were test builds that were never published; everything below is new in this release.)
 - **Web page served by the console.** The 3DS app serves a file manager on port 8080 (address on the top screen; **R** turns it off/on): browse the SD card, view images, edit text files (atomic save, optional `.bak`), **drag and drop** files and folders to upload (SHA-256 checked by the console, conflict handling), download, plus Settings (device, SD and memory, opened folders, pairing, preferences) and an FAQ with the local MCP install steps. Portuguese and English, light/dark, phone friendly (one tap opens folders; checkboxes select). Same pairing, modes and folders as the CLI: the page cannot change any of them.
