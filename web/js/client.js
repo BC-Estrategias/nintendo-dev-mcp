@@ -258,6 +258,18 @@
       return { trashPath: t.str(Tag.TRASH_PATH) };
     }
 
+    /** Permanently deletes an item inside a trash folder, or empties the trash (the folder itself). Repeats the console's
+     * small batches until done; `onProgress(removed)` may return false to stop early. */
+    async purge(path, onProgress) {
+      let removed = 0;
+      for (;;) {
+        const t = C.parseTlv((await this.request(Command.FS_PURGE, C.encodeTlv([[Tag.PATH, C.str(path)]]), SLOW_MS)).payload);
+        removed += t.u32(Tag.PURGED) || 0;
+        if (t.u8(Tag.PURGE_MORE) !== 1) return { removed, complete: true };
+        if (onProgress && onProgress(removed) === false) return { removed, complete: false };
+      }
+    }
+
     /**
      * Streams a file (or a range). `onChunk(Uint8Array)` gets each DATA payload (copy it if you keep it).
      * Verifies the SHA-256 the console computes unless verify:false. If anything fails after the first RES, the

@@ -643,6 +643,25 @@ export class NdpClient {
     return { trashPath };
   }
 
+  /**
+   * PERMANENTLY deletes an item that is inside a trash folder (`<write root>/.ndp-trash/...`), or empties the trash when
+   * `path` is the trash folder itself (agent >= 1.2.2). Anything outside a trash is refused with PROTECTED_PATH. The console
+   * works in small batches, so this repeats the request until it reports nothing left; `onProgress` gets the running total
+   * of files and folders removed, and returning `false` from it stops after the current batch. Not idempotent-safe to retry
+   * blindly after a transport error, but re-running it simply continues where the disk stands.
+   */
+  async purge(path: string, onProgress?: (removed: number) => boolean | void): Promise<{ removed: number; complete: boolean }> {
+    let removed = 0;
+    for (;;) {
+      const res = await this.request(Command.FS_PURGE, encodeTlv([[Tag.PATH, str(normalizePath(path))]]), SLOW_FS_TIMEOUT_MS);
+      const t = parseTlv(res.payload);
+      removed += t.u32(Tag.PURGED) ?? 0;
+      const more = t.u8(Tag.PURGE_MORE) === 1;
+      if (!more) return { removed, complete: true };
+      if (onProgress?.(removed) === false) return { removed, complete: false };
+    }
+  }
+
   async mkdir(path: string): Promise<void> {
     // Measured on a real 3DS: creating a directory takes ~5.7 s (files take ~85 ms), so wait generously.
     await this.request(Command.FS_MKDIR, encodeTlv([[Tag.PATH, str(normalizePath(path))]]), SLOW_FS_TIMEOUT_MS);

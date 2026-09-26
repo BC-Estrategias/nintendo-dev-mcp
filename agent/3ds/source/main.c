@@ -159,6 +159,13 @@ static int fs_remove(void *ctx, const char *path) {
   return rc;
 }
 
+static int fs_remove_dir(void *ctx, const char *path) {
+  uint64_t t0 = now_ms(NULL);
+  int rc = g_fs_base.remove_dir(ctx, path);
+  slow_check("rmdir", path, t0);
+  return rc;
+}
+
 static u32 *g_soc_buf = NULL;
 static bool g_soc_up = false, g_ndm_locked = false, g_ps_ok = false;
 static bool g_wifi = false, g_listening = false, g_web_on = AGENT_WEB_DEFAULT, g_web_listening = false;
@@ -565,6 +572,7 @@ int main(void) {
     g_fs.file_sync = fs_file_sync;
     g_fs.rename = fs_rename;
     g_fs.remove_file = fs_remove;
+    g_fs.remove_dir = fs_remove_dir;
     cfg.fs = &g_fs; /* default policy: read everything except the agent's config; no writes */
   }
   memset(&plat, 0, sizeof plat);

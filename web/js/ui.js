@@ -82,6 +82,7 @@
     const kill = () => el.remove();
     el.addEventListener("click", kill);
     if (ms) setTimeout(kill, ms);
+    kill.set = (text) => { const s = el.querySelector("span"); if (s) s.textContent = text; };
     return kill;
   }
 

@@ -182,3 +182,10 @@ Pré-requisitos: v1.2.1 (ou mais nova) instalada (CIA/3dsx), console na mesma re
 8. Pare o app (START) e reabra: o IP pode mudar; confira que a tela mostra o novo endereço.
 **Coletar:** foto da tela de cima com `Page`/`Browser`, a velocidade de upload/download, `agent.log` (linhas `[WEB]`), e qualquer erro em vermelho na página.
 
+### v1.2.2 — excluir para sempre / esvaziar lixeira
+1. Apague um arquivo de teste pela página, abra `.ndp-trash`, selecione-o e use **Excluir para sempre** (confirme). Ele some e o espaço livre (Configurações → Cartão SD) aumenta.
+2. Apague uma **pasta com muitos arquivos** e use **Esvaziar lixeira**. **Anote o tempo** e se o contador avança em lotes; tente **Cancelar** no meio (o resto continua na lixeira).
+3. Com o console em `READ_ONLY` (X), o botão fica desativado e `ndev purge <ip> <caminho na lixeira>` responde `FORBIDDEN_MODE`.
+4. `ndev purge <ip> /3ds/nintendo-dev-agent/algum.txt` (fora da lixeira) deve responder `PROTECTED_PATH`.
+5. Baixe um arquivo grande (>50 MiB) e veja a porcentagem no aviso e se a aba do navegador não incha demais.
+

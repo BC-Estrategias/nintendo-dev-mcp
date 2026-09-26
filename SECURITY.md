@@ -4,7 +4,7 @@
 The console and the computer are on the same LAN. The agent defends against **other devices on that LAN** and against an **assistant that only has the MCP tools**:
 - nobody can read or write the SD card without having been paired by a person at the console (80-bit one-time code shown on the console; per-frame HMAC-SHA-256 with counters, so tampering and replay close the connection);
 - nothing on the network can change the access mode, the opened folders or the pairings — those are changed with the console's buttons only;
-- protected system zones are never writable, and deletes only move items to a trash folder.
+- protected system zones are never writable, and deletes only move items to a trash folder; permanent deletion (`FS_PURGE`) works only on what is already inside a trash, needs DEVELOPMENT mode, and is not available through the MCP server.
 
 The **web page** (v1.2.0+) uses the same pairing and the same rules: a browser must be paired with the code shown on the console, the page cannot change the mode, the opened folders or the pairings, and it can be switched off with **R** on the console. Because it is plain `http://` on the LAN, the console rejects requests whose `Host` is not its own address (DNS rebinding) and WebSocket upgrades whose `Origin` is not the page itself (so a malicious website cannot drive it through your browser); it accepts only `GET`/`HEAD` with no body, serves a strict Content-Security-Policy, and caps frame and header sizes. The pairing key is kept in the browser's storage: anyone using that browser profile can use it (untick "Remember" on shared computers, or use *Forget this browser*).
 

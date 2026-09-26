@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.2
+- **Delete forever / Empty trash.** New command `FS_PURGE` (0x0034): permanently deletes items that are **inside a trash folder** (or empties it), only in DEVELOPMENT mode and only in writable folders; it works in small batches so a huge trash never keeps the console busy, and the page shows the count with a Cancel button. Also `ndev purge`. The MCP server does **not** get it: an assistant still cannot destroy data.
+- Large downloads no longer sit in memory as one big list: the page assembles them in 8 MiB blocks (the browser can keep those on disk) and shows the percentage.
+
 ## 1.2.1
 - Two browser tabs (or two browsers) no longer fight over the console: the console has one page connection, and the page that gets replaced is told (WebSocket close 4001) and shows "opened somewhere else" with a *Use this tab* button, instead of reconnecting and evicting the other one every few seconds.
 - 1.2.0 was a test build that was never published; everything below shipped first in 1.2.1.

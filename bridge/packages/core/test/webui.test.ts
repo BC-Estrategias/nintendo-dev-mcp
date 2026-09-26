@@ -88,6 +88,19 @@ test("util: what the page promises about a path matches the console's policy", (
   assert.equal(U.accessOf("/anything", null, "DEVELOPMENT"), "read");
 });
 
+test("util: blobCollector groups downloaded bytes into blobs without losing or reordering any", async () => {
+  const col = U.blobCollector(1000);
+  const parts: Uint8Array[] = [];
+  for (let i = 0; i < 37; i++) { const b = new Uint8Array(137).map((_, j) => (i * 31 + j) & 255); parts.push(b); col.add(b); b.fill(0); } // the caller reuses its buffer
+  assert.equal(col.size, 37 * 137);
+  const blob = col.blob("application/pdf");
+  assert.equal(blob.size, 37 * 137);
+  assert.equal(blob.type, "application/pdf");
+  const got = new Uint8Array(await blob.arrayBuffer());
+  for (let i = 0; i < 37; i++) for (let j = 0; j < 137; j++) assert.equal(got[i * 137 + j], (i * 31 + j) & 255);
+  assert.equal(U.blobCollector().blob().size, 0);
+});
+
 // ------------------------------------------------------------------------------------------------ i18n
 
 const placeholders = (s: string) => [...s.matchAll(/\{(\d+)\}/g)].map((m) => m[1]).sort();

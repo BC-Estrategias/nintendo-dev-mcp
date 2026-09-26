@@ -36,6 +36,8 @@ Usage:
                                                   refuses to overwrite unless --replace
   ndev mkdir <host[:port]> <path>                 create a directory (the parent must exist)
   ndev mv    <host[:port]> <from> <to>            move/rename a file or folder (never overwrites; also restores from the trash)
+  ndev purge <host[:port]> <path>...              PERMANENTLY delete items inside a trash folder (<root>/.ndp-trash/...), or
+                                                  empty a trash by giving the folder itself; refuses anything else
   ndev rm    <host[:port]> <path>...              move files/folders to the device's trash
                                                   (<write root>/.ndp-trash/); nothing is destroyed
 
@@ -175,7 +177,7 @@ async function main(argv: string[]): Promise<number> {
       client.close();
     }
   }
-  if (!["hello", "ping", "info", "access", "ls", "stat", "cat", "get", "put", "mkdir", "mv", "rm"].includes(cmd) || !target) {
+  if (!["hello", "ping", "info", "access", "ls", "stat", "cat", "get", "put", "mkdir", "mv", "rm", "purge"].includes(cmd) || !target) {
     console.error(USAGE);
     return 2;
   }
@@ -288,6 +290,24 @@ async function main(argv: string[]): Promise<number> {
     return withClient(target, async (client) => {
       console.log(`${from} -> ${await client.rename(from, to)}`);
       return 0;
+    });
+  }
+
+  if (cmd === "purge") {
+    const paths = parseFlags(rest, []).rest;
+    if (paths.length === 0) throw new Error("purge needs at least one <path> inside a .ndp-trash folder");
+    return withClient(target, async (client) => {
+      let failed = 0;
+      for (const p of paths) {
+        try {
+          const r = await client.purge(p);
+          console.log(`${p}: ${r.removed} item(s) deleted for good`);
+        } catch (e) {
+          failed++;
+          console.error(`${p}: ${e instanceof NdpRemoteError ? `${e.statusName}${e.detail ? ` — ${e.detail}` : ""}` : (e as Error).message}`);
+        }
+      }
+      return failed ? 1 : 0;
     });
   }
 

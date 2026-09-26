@@ -21,6 +21,8 @@ Remover: `claude mcp remove nintendo` / `codex mcp remove nintendo`.
 O endereço do console **não precisa** ser configurado: o servidor usa `--host`/`$NDEV_HOST` se houver; senão o último endereço conhecido; senão **varre as sub-redes deste computador** procurando o agente (o IP do 3DS muda por DHCP). Descoberta manual: `ndev find`.
 
 ## Ferramentas
+> `nintendo_fs_delete` só **move para a lixeira**. Excluir para sempre / esvaziar a lixeira existe na página web e em `ndev purge`, mas **não** como ferramenta MCP, de propósito: um assistente não destrói dados.
+
 > A mesma coisa (e mais) está disponível numa página web servida pelo próprio console (`http://<ip>:8080`): gerenciador de arquivos com arrastar-e-soltar, editor, configurações e um FAQ que traz estes passos de instalação. O MCP continua funcionando ao mesmo tempo.
 
 | Ferramenta | Faz | Muda o SD? |

@@ -32,7 +32,8 @@ typedef struct {
   long (*file_write)(void *ctx, void *file, const void *buf, size_t n); /* n, or -NDP_ST_* (e.g. NO_SPACE) */
   int (*file_sync)(void *ctx, void *file);                        /* flush to the medium */
   int (*rename)(void *ctx, const char *from, const char *to);
-  int (*remove_file)(void *ctx, const char *path);                /* internal cleanup only; never exposed */
+  int (*remove_file)(void *ctx, const char *path);                /* internal cleanup, and FS_PURGE inside a trash */
+  int (*remove_dir)(void *ctx, const char *path);                 /* empty directory; only FS_PURGE inside a trash. NULL = no purge of folders */
 } ndp_fs_ops;
 
 #endif

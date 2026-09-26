@@ -13,6 +13,7 @@ const char *ndp_command_name(uint16_t command) {
     case NDP_CMD_FS_MKDIR: return "FS_MKDIR";
     case NDP_CMD_FS_RENAME: return "FS_RENAME";
     case NDP_CMD_FS_DELETE: return "FS_DELETE";
+    case NDP_CMD_FS_PURGE: return "FS_PURGE";
     default: return "?";
   }
 }

@@ -619,6 +619,106 @@ static void test_rename(void) {
     CHECK(is_err(frame(&g_agent, NDP_KIND_REQ, ++g_id, NDP_CMD_FS_RENAME, t.b, t.w.len), NDP_ST_BAD_REQUEST), "new_path is required"); }
 }
 
+/* ---- FS_PURGE: permanent deletion, only inside a trash ---- */
+static int g_remove_fail;
+static int w_remove(void *c, const char *p) { return g_remove_fail ? NDP_ST_IO_ERROR : g_real_ops.remove_file(c, p); }
+
+static resp_t purge(const char *path) { return simple(&g_agent, NDP_CMD_FS_PURGE, path); }
+/* repeats the request until `more` is 0, like the page does; returns the number of requests, *removed the total */
+static int purge_all(const char *path, long *removed, resp_t *last) {
+  int calls = 0;
+  *removed = 0;
+  for (;;) {
+    resp_t r = purge(path);
+    calls++;
+    *last = r;
+    if (!is_res(r)) return calls;
+    *removed += tlv_u32(r, NDP_TAG_PURGED);
+    if (tlv_u8(r, NDP_TAG_PURGE_MORE) == 0) return calls;
+    if (calls > 100) return calls;
+  }
+}
+
+static void test_purge(void) {
+  resp_t r, last;
+  long removed;
+  int calls, i;
+  char p[128];
+
+  ndp_agent_close(&g_agent);
+  g_ops = g_real_ops;
+  new_agent(NDP_MODE_DEVELOPMENT);
+  mk(DIR "/.ndp-trash");
+
+  /* one file in the trash */
+  put(DIR "/.ndp-trash/pg1.txt", "PG1", 3);
+  r = purge(DIR "/.ndp-trash/pg1.txt");
+  CHECK(is_res(r) && tlv_u32(r, NDP_TAG_PURGED) == 1 && tlv_u8(r, NDP_TAG_PURGE_MORE) == 0, "a file is deleted for good");
+  CHECK(!exists(DIR "/.ndp-trash/pg1.txt") && exists(DIR "/.ndp-trash"), "gone, the trash folder stays");
+  CHECK(is_err(purge(DIR "/.ndp-trash/pg1.txt"), NDP_ST_NOT_FOUND), "already gone");
+
+  /* a deep folder with many files takes several requests, and everything goes */
+  mk(DIR "/.ndp-trash/tree"); mk(DIR "/.ndp-trash/tree/a"); mk(DIR "/.ndp-trash/tree/a/b"); mk(DIR "/.ndp-trash/tree/c");
+  for (i = 0; i < 40; i++) {
+    snprintf(p, sizeof p, DIR "/.ndp-trash/tree/f%02d", i); put(p, "x", 1);
+    snprintf(p, sizeof p, DIR "/.ndp-trash/tree/a/b/g%02d", i); put(p, "y", 1);
+  }
+  put(DIR "/.ndp-trash/tree/c/last", "z", 1);
+  calls = purge_all(DIR "/.ndp-trash/tree", &removed, &last);
+  CHECK(is_res(last) && calls >= 5, "the work is split into bounded requests (%d)", calls);
+  CHECK(removed == 40 + 40 + 1 + 4, "every file and folder counted (%ld)", removed);
+  CHECK(!exists(DIR "/.ndp-trash/tree") && exists(DIR "/.ndp-trash"), "the whole tree is gone");
+  { r = purge(DIR "/.ndp-trash/tree"); CHECK(is_err(r, NDP_ST_NOT_FOUND), "and it is not found any more"); }
+
+  /* emptying the trash keeps the trash folder (first clear what earlier tests left in it) */
+  (void)purge_all(DIR "/.ndp-trash", &removed, &last);
+  CHECK(is_res(last), "the leftovers of the earlier tests can be emptied");
+  put(DIR "/.ndp-trash/e1", "1", 1); put(DIR "/.ndp-trash/e2", "2", 1); mk(DIR "/.ndp-trash/ed"); put(DIR "/.ndp-trash/ed/x", "3", 1);
+  calls = purge_all(DIR "/.ndp-trash", &removed, &last);
+  CHECK(is_res(last) && removed == 4, "empty the trash: 3 files + 1 folder (%ld)", removed);
+  CHECK(exists(DIR "/.ndp-trash") && !exists(DIR "/.ndp-trash/e1") && !exists(DIR "/.ndp-trash/ed"), "empty, folder kept");
+  calls = purge_all(DIR "/.ndp-trash", &removed, &last);
+  CHECK(is_res(last) && removed == 0 && calls == 1, "an empty trash is fine");
+
+  /* nothing outside a trash can be purged, whatever the policy says about writing it */
+  put(DIR "/keep.txt", "K", 1); mk(DIR "/keepdir"); put(DIR "/keepdir/k", "k", 1);
+  CHECK(is_err(purge(DIR "/keep.txt"), NDP_ST_PROTECTED_PATH) && exists(DIR "/keep.txt"), "a normal file is not purgeable");
+  CHECK(is_err(purge(DIR "/keepdir"), NDP_ST_PROTECTED_PATH) && exists(DIR "/keepdir/k"), "nor a folder");
+  CHECK(is_err(purge(DIR), NDP_ST_PROTECTED_PATH) && exists(DIR "/keep.txt"), "nor a write root");
+  CHECK(is_err(purge("/other/.ndp-trash/x"), NDP_ST_PROTECTED_PATH), "a trash outside the write roots");
+  CHECK(is_err(purge(DIR "/config"), NDP_ST_PROTECTED_PATH) && exists(DIR "/config"), "never_write zone");
+  CHECK(is_err(purge("/luma"), NDP_ST_PROTECTED_PATH) && exists("/luma"), "/luma");
+  CHECK(is_err(purge("/"), NDP_ST_PROTECTED_PATH), "the root");
+  CHECK(is_err(purge(DIR "/.ndp-trash/../keep.txt"), NDP_ST_PATH_INVALID) && exists(DIR "/keep.txt"), "no traversal out of the trash");
+  CHECK(is_err(purge(DIR "/.ndp-trashy/x"), NDP_ST_PROTECTED_PATH), "a look-alike folder is not a trash");
+  { treq t; treq_init(&t); CHECK(is_err(frame(&g_agent, NDP_KIND_REQ, ++g_id, NDP_CMD_FS_PURGE, t.b, t.w.len), NDP_ST_BAD_REQUEST), "path required"); }
+
+  /* symlinks are invisible: a folder holding one cannot be emptied, and the link's target is never touched */
+  mk(DIR "/.ndp-trash/withlink"); put("/other/precious.txt", "P", 1);
+  { char l[256], t[256]; full(l, sizeof l, DIR "/.ndp-trash/withlink/lnk"); full(t, sizeof t, "/other/precious.txt"); symlink(t, l); }
+  r = purge(DIR "/.ndp-trash/withlink");
+  CHECK(is_err(r, NDP_ST_IO_ERROR) && exists("/other/precious.txt"), "a symlink blocks the folder but its target is safe");
+
+  /* READ_ONLY forbids it */
+  put(DIR "/.ndp-trash/ro", "R", 1);
+  ndp_agent_close(&g_agent); new_agent(NDP_MODE_READ_ONLY);
+  CHECK(is_err(purge(DIR "/.ndp-trash/ro"), NDP_ST_FORBIDDEN_MODE) && exists(DIR "/.ndp-trash/ro"), "READ_ONLY forbids purge");
+  ndp_agent_close(&g_agent); new_agent(NDP_MODE_DEVELOPMENT);
+
+  /* a failing removal reports the error and stops; the rest is still there */
+  g_ops = g_real_ops; g_ops.remove_file = w_remove; g_agent.cfg.fs = &g_ops; g_remove_fail = 1;
+  CHECK(is_err(purge(DIR "/.ndp-trash/ro"), NDP_ST_IO_ERROR) && exists(DIR "/.ndp-trash/ro"), "I/O failure leaves the item");
+  g_remove_fail = 0;
+  CHECK(is_res(purge(DIR "/.ndp-trash/ro")) && !exists(DIR "/.ndp-trash/ro"), "and works once the card does");
+
+  /* a platform without remove_dir can still purge files, and says so for folders */
+  put(DIR "/.ndp-trash/nd", "1", 1); mk(DIR "/.ndp-trash/ndd");
+  g_ops = g_real_ops; g_ops.remove_dir = NULL; g_agent.cfg.fs = &g_ops;
+  CHECK(is_res(purge(DIR "/.ndp-trash/nd")) && !exists(DIR "/.ndp-trash/nd"), "files need no remove_dir");
+  CHECK(is_err(purge(DIR "/.ndp-trash/ndd"), NDP_ST_UNSUPPORTED_COMMAND) && exists(DIR "/.ndp-trash/ndd"), "folders need it");
+  g_ops = g_real_ops; g_agent.cfg.fs = &g_ops;
+}
+
 int main(void) {
   char tmpl[] = "/tmp/ndp-w-test-XXXXXX", tmpl2[] = "/tmp/ndp-w-other-XXXXXX", cmd[200];
   if (!mkdtemp(tmpl) || !mkdtemp(tmpl2)) { perror("mkdtemp"); return 2; }
@@ -640,6 +740,7 @@ int main(void) {
   test_symlinks();
   test_delete();
   test_rename();
+  test_purge();
 
   ndp_agent_close(&g_agent);
   snprintf(cmd, sizeof cmd, "rm -rf %s %s", g_root, g_other);

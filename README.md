@@ -7,13 +7,13 @@ AI agent ⇄ MCP (stdio) ⇄ ndev bridge (your computer) ⇄ NDP v1 over TCP/Wi-
 Browser ⇄ the same page, served by the 3DS app on port 8080 (NDP over WebSocket) ⇄ ┘
 ```
 
-**Status (v1.2.1):** usable and tested on a New 3DS with Luma3DS 13.3.3 — read/write/delete-to-trash on the SD card, pairing with per-frame HMAC, folders chosen on the console, CLI, MCP server and a **web file manager served by the console itself**. Design notes and dead ends (3GX plugin inside a game, replacing the Game Notes applet) are in [`docs/research/`](docs/research).
+**Status (v1.2.2):** usable and tested on a New 3DS with Luma3DS 13.3.3 — read/write/delete-to-trash on the SD card, pairing with per-frame HMAC, folders chosen on the console, CLI, MCP server and a **web file manager served by the console itself**. Design notes and dead ends (3GX plugin inside a game, replacing the Game Notes applet) are in [`docs/research/`](docs/research).
 
 > This drives **real hardware**. Writes modify a real SD card. Read the safety model below before you enable them.
 
 ## What you get
 - **A web page served by the 3DS** — open `http://<console-ip>:8080` (the address is on the console's top screen) in any browser on your network: browse the SD card, **drag and drop** to upload, view images, edit text files, download, rename, move to the trash and restore, see the console's storage, and read an FAQ (with how to install the local MCP). It replaces an FTP client and needs nothing installed. Portuguese and English. **R** on the console turns it off.
-- **`ndev` CLI** — `find`, `info` (model, firmware, memory, SD space), `ls`, `cat`, `get`, `put`, `mkdir`, `mv`, `rm` (moves to a trash folder, never deletes), `pair`, `access`.
+- **`ndev` CLI** — `find`, `info` (model, firmware, memory, SD space), `ls`, `cat`, `get`, `put`, `mkdir`, `mv`, `rm` (moves to a trash folder), `purge` (deletes for good, only inside a trash folder), `pair`, `access`.
 - **MCP server** (`@ndev/mcp`, 13 tools `nintendo_*`) — device info, list/stat/read/write/mkdir/move/delete, upload/download to a local sandbox folder, agent log. Auto-discovers the console when its IP changes (DHCP).
 - **3DS agent** — a normal 3DS app (`.3dsx` or `.cia`) with a small on-screen UI.
 
@@ -22,7 +22,7 @@ Browser ⇄ the same page, served by the 3DS app on port 8080 (NDP over WebSocke
 - **You choose the folders**, on the console: press **A** → *Access folders* → **Y** cycles closed → read → read+write. By default only `/3ds/nintendo-dev-agent` is open. No network command can change this list.
 - **Protected system zones are never writable**, even if you open `/`: `/Nintendo 3DS`, `/luma` (except `/luma/plugins` and `/luma/titles`), `/boot.firm`, `/gm9`, `/private`, and the agent's own config.
 - **Pairing required.** Press **Y** on the console, then type the code it shows in `ndev pair <ip>`. The code never crosses the network; every frame after login is authenticated with HMAC-SHA-256 (integrity and authenticity, **not encryption** — file contents are visible on your LAN). The MCP server has **no** pairing tool, so an assistant cannot pair itself.
-- **Deleting never destroys**: items are moved to `<write root>/.ndp-trash/`. Writes are atomic (temp file → verify → rename) and never overwrite silently.
+- **Deleting never destroys**: items are moved to `<write root>/.ndp-trash/`. Only a person can empty a trash (the page's *Delete forever* / *Empty trash*, or `ndev purge`); the MCP server has no such tool, and nothing outside a trash can be deleted for good. Writes are atomic (temp file → verify → rename) and never overwrite silently.
 - File contents returned to an assistant are treated as **untrusted data** (prompt-injection guidance is in the tool descriptions).
 - Everything is limited to the SD card. NAND is out of scope by design.
 

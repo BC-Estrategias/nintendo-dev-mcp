@@ -121,9 +121,9 @@
   async function downloadAll(path, name) {
     const kill = toast(t("downloading", name), "info", 0);
     try {
-      const chunks = [];
-      await S.run((c) => c.read(path, {}, (b) => { chunks.push(b.slice()); }));
-      saveBlob(new Blob(chunks), name);
+      const col = U.blobCollector();
+      await S.run((c) => c.read(path, { onProgress: (n, total) => kill.set(t("downloadingPct", name, total ? Math.round((100 * n) / total) : 0)) }, (b) => col.add(b)));
+      saveBlob(col.blob(), name);
     } catch (e) { toast(e.message, "error"); }
     kill();
   }

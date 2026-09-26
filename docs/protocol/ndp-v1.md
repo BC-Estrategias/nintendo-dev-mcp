@@ -86,6 +86,7 @@ mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16
 | 0x0031 | FS_MKDIR | M5 ✔ | cria um diretório |
 | 0x0032 | FS_RENAME | ✔ (1.2.0) | move/renomeia um arquivo ou pasta (nunca sobrescreve) |
 | 0x0033 | FS_DELETE | M5 ✔ | **move** para a lixeira (nunca apaga de verdade) |
+| 0x0034 | FS_PURGE | ✔ (1.2.2) | apaga **de verdade**, só o que está dentro de uma lixeira (ou esvazia a lixeira) |
 | 0x0040+ | LOG_* / CRASH_* | fase 3 | |
 | 0x8000–0xFFFF | reservado a extensões de plataforma | | |
 
@@ -168,6 +169,7 @@ ERR carrega, opcionalmente: `0x0001 detail` (str, texto humano curto, **informat
 | 0x0054 / 0x0055 | sys_mem_total / sys_mem_free | u64 | DEVICE_INFO RES: região SYSTEM |
 | 0x0056 / 0x0057 | sd_total / sd_free | u64 | DEVICE_INFO RES: cartão SD, bytes |
 | 0x0058 | new_path | str | FS_RENAME REQ (destino) e RES (destino normalizado) |
+| 0x0059 / 0x005A | purged / purge_more | u32 / u8 | FS_PURGE RES: itens (arquivos e pastas) removidos por este pedido / 1 se ainda resta trabalho |
 
 ## 8. Ordem de validação de um frame recebido pelo agent
 Depois que o decoder entrega um frame, o agent avalia **nesta ordem** e responde ao primeiro problema:
@@ -290,6 +292,7 @@ Agent  → RES {written, sha256, replaced}       (ou ERR)
 - A lixeira (`.ndp-trash`) é criada sob demanda (um `mkdir`, que no 3DS leva ~6 s na primeira vez por raiz). Nome de destino = o nome original; se já existir, `<nome>.1`, `<nome>.2`… (o sufixo `.N` não usa `~`, então continua endereçável).
 - `FS_WRITE`/`FS_MKDIR` para dentro de uma lixeira → `PROTECTED_PATH` (a lixeira é gerenciada pelo agent). A leitura funciona normalmente (é como se recupera o conteúdo: ler e/ou o usuário renomear pelo cartão).
 - Falha no `rename` → `IO_ERROR`, item intacto no lugar original.
+- A remoção definitiva **não** existe em `FS_DELETE`: é o `FS_PURGE` abaixo, restrito ao que já está numa lixeira.
 
 ### FS_RENAME (0x0032)
 `REQ {path, new_path}` → `RES {new_path}`. Move ou renomeia um arquivo ou uma pasta inteira (com o conteúdo) por `rename` (atômico, mesma partição), **sem nunca sobrescrever**.
@@ -298,6 +301,13 @@ Agent  → RES {written, sha256, replaced}       (ou ERR)
 - `NOT_FOUND`: origem inexistente ou pasta de destino inexistente (nunca cria pastas). `EXISTS`: o destino já existe, ou origem = destino. `BAD_REQUEST`: `new_path` ausente ou pasta movida para dentro de si mesma.
 - Mudar só a **caixa** do nome (`a` → `A`; o cartão FAT não distingue caixa) é aceito: o agente renomeia em dois passos por um nome temporário `<origem>.ndp-ren` e desfaz se o segundo falhar.
 - Uma falha do SO deixa a origem no lugar (`IO_ERROR`).
+
+### FS_PURGE (0x0034, agente ≥ 1.2.2)
+`REQ {path}` → `RES {purged, purge_more}`. **Apaga de verdade**, mas **somente dentro de uma lixeira** (`<write root>/.ndp-trash`). `path` é um item dentro da lixeira (arquivo, ou pasta com tudo o que ela contém) ou a própria pasta da lixeira, que é **esvaziada** (a pasta continua existindo).
+- Passa pela política de **escrita** (§11): `FORBIDDEN_MODE` em `READ_ONLY`; `PROTECTED_PATH` para qualquer coisa fora de uma lixeira (inclusive uma `write_root`, uma zona `never_write` ou uma pasta parecida como `.ndp-trashy`), `PATH_INVALID`, `BAD_REQUEST` sem `path`. `NOT_FOUND` se o item não existe.
+- O trabalho por pedido é **limitado** (16 remoções). `purge_more = 1` significa que ainda resta trabalho: o cliente DEVE repetir o mesmo `REQ` até receber `0`. Nada é lembrado entre pedidos (cada um recomeça do que está no disco), então uma queda de conexão no meio é segura. `purged` conta arquivos e pastas removidos neste pedido.
+- Links simbólicos não existem para o protocolo: uma pasta que contém um não pode ser esvaziada (`IO_ERROR`) e o alvo do link nunca é tocado. Falha do SO → `IO_ERROR`, o que restou continua lá. Plataforma sem `remove_dir` → `UNSUPPORTED_COMMAND` para pastas.
+- O servidor MCP **não** expõe esta operação (um assistente nunca apaga em definitivo); a CLI (`ndev purge`) e a página web sim.
 
 ## 15. Página web e transporte WebSocket (opcional, agente ≥ 1.2.0)
 O agente PODE servir uma página (um único HTML, gzip) e um endpoint WebSocket numa **segunda porta TCP** (o app do 3DS usa **8080**). Nada muda no NDP: cada mensagem WebSocket **binária** carrega bytes do mesmo fluxo de frames das §2–§14 (um frame pode atravessar várias mensagens ou várias frames caberem numa só; a fronteira da mensagem não tem significado). Pareamento, AUTH, MAC por frame, política de acesso e modo valem **exatamente** como na porta NDP.

@@ -68,9 +68,9 @@
     const id = "dl:" + entry.name;
     const kill = toast(t("downloading", entry.name), "info", 0);
     try {
-      const chunks = [];
-      await S.run((c) => c.read(full(entry.name), {}, (b) => { chunks.push(b.slice()); }));
-      saveBlob(new Blob(chunks), entry.name);
+      const col = U.blobCollector();
+      await S.run((c) => c.read(full(entry.name), { onProgress: (n, total) => kill.set(t("downloadingPct", entry.name, total ? Math.round((100 * n) / total) : 0)) }, (b) => col.add(b)));
+      saveBlob(col.blob(), entry.name);
       toast(t("downloaded", entry.name), "ok", 2500);
     } catch (e) { fail(e, entry.name); if (S.client.isClosed) S.connect(); }
     kill();
@@ -88,6 +88,29 @@
       try { await S.run((c) => c.delete(full(e.name))); ok++; } catch (err) { fail(err, e.name); }
     }
     if (ok) toast(t("movedToTrash", ok), "ok", 3000);
+    await refresh();
+  }
+
+  /** Permanent deletion, only inside a trash (the console refuses it anywhere else). `targets` are full paths: items in a
+   * trash, or the trash folder itself (which empties it). The console works in small batches; a dialog shows the count. */
+  async function purge(targets, empty, label) {
+    if (!targets.length) return;
+    const title = empty ? t("emptyTrash") : t("deleteForever");
+    const msg = empty ? t("confirmEmpty") : targets.length === 1 ? t("confirmPurge1", label) : t("confirmPurgeN", targets.length);
+    if (!(await confirmBox(title, msg + " " + t("cannotUndo"), title, true))) return;
+    let cancelled = false, total = 0, failed = false;
+    const status = h("p", { text: t("purging", 0) });
+    dialog({ title, body: status, buttons: [{ label: t("cancel"), value: "cancel" }] }).then(() => { cancelled = true; });
+    try {
+      for (const p of targets) {
+        const r = await S.run((c) => c.purge(p, (n) => { status.textContent = t("purging", total + n); return !cancelled; }));
+        total += r.removed;
+        if (!r.complete) break;
+      }
+    } catch (e) { failed = true; fail(e, title); if (S.client && S.client.isClosed) S.connect(); }
+    const dlgs = document.querySelectorAll(".backdrop .dialog");
+    if (dlgs.length) dlgs[dlgs.length - 1].close(undefined);
+    if (!failed) toast(cancelled ? t("purgeStopped", total) : t("purged", total), cancelled ? "info" : "ok", 4000);
     await refresh();
   }
 
@@ -290,6 +313,13 @@
     if (isReadOnlyMode()) { toast(t("readOnlyBanner"), "error", 6000); return; }
     const access = U.accessOf(targetDir, S.access, S.info.mode);
     if (access !== "write" || U.trashRootOf(targetDir)) { toast(t("notWritableHere"), "error", 7000); return; }
+    // the card is FAT32: no file of 4 GiB or more; and it must fit (checked against the free space the console reports)
+    const tooBig = items.filter((i) => i.file.size >= 4 * 1024 * 1024 * 1024);
+    if (tooBig.length) { toast(t("fat32Limit", tooBig[0].file.name), "error", 9000); items = items.filter((i) => !tooBig.includes(i)); if (!items.length) return; }
+    const need = items.reduce((n, i) => n + i.file.size, 0);
+    if (need > 8 * 1024 * 1024) { try { await S.refreshContext(); } catch (_) { /* use what we have */ } }
+    const free = S.device && S.device.sd && S.device.sd.free;
+    if (free !== undefined && need > free) { toast(t("noRoom", U.formatSize(need), U.formatSize(free)), "error", 10000); return; }
     const folders = new Set(items.flatMap((i) => i.mkdirs));
     if (folders.size && !(await confirmBox(t("uploadFolders"), t("uploadFoldersNote", folders.size), t("ok")))) return;
     enqueue(items);
@@ -314,7 +344,8 @@
       "-",
       one && { label: t("rename"), icon: "edit", disabled: !writable, run: () => rename(one) },
       one && U.trashRootOf(full(one.name)) && { label: t("restore"), icon: "restore", run: () => restore(one) },
-      { label: t("moveToTrash"), icon: "trash", danger: true, disabled: !writable || inTrash, run: () => remove(sel) },
+      inTrash && !(one && one.name === ".ndp-trash") ? { label: t("deleteForever"), icon: "trash", danger: true, disabled: !writable, run: () => purge(sel.map((e) => full(e.name)), false, sel[0].name) } : { label: t("moveToTrash"), icon: "trash", danger: true, disabled: !writable || inTrash, run: () => remove(sel) },
+      one && one.name === ".ndp-trash" && one.type === "dir" && !U.trashRootOf(st.cwd) ? { label: t("emptyTrash"), icon: "trash", danger: true, disabled: !writable, run: () => purge([full(one.name)], true) } : null,
       "-",
       one && { label: t("copyPath"), icon: "copy", run: () => copyText(full(one.name)) },
     ].filter(Boolean));
@@ -351,7 +382,9 @@
       h("span.sep-v"),
       h("button", { disabled: !(sel.length === 1 && sel[0].type === "file"), onclick: () => download(sel[0]) }, icon("download"), t("download")),
       h("button", { disabled: !(sel.length === 1 && writable), onclick: () => rename(sel[0]) }, icon("edit"), t("rename")),
-      h("button.danger", { disabled: !(sel.length && writable && !U.trashRootOf(st.cwd)), onclick: () => remove(sel) }, icon("trash"), t("moveToTrash")),
+      inTrash() ? null : h("button.danger", { disabled: !(sel.length && writable), onclick: () => remove(sel) }, icon("trash"), t("moveToTrash")),
+      inTrash() ? h("button.danger", { disabled: !(sel.length && writable), onclick: () => purge(sel.map((e) => full(e.name)), false, sel[0].name) }, icon("trash"), t("deleteForever")) : null,
+      inTrash() ? h("button.danger", { disabled: !(writable && list.length), onclick: () => purge([U.trashRootOf(st.cwd)], true) }, icon("trash"), t("emptyTrash")) : null,
       h("span.grow"),
       h("span.count", { text: t("itemsCount", list.length) + (sel.length ? " · " + t("selectedN", sel.length) : "") }));
   }
@@ -381,7 +414,7 @@
     const list = visible();
     if (st.loading && !st.entries.length) { fill(wrap, h("div.empty", { text: t("loading") })); return; }
     if (st.error) { wrap.replaceChildren(); return; }
-    if (!list.length) { fill(wrap, h("div.empty", null, icon("folder"), h("p", { text: st.filter ? t("noMatches") : t("emptyFolder") }), canWrite() ? h("p.hint", { text: t("dropHint") }) : null)); return; }
+    if (!list.length) { fill(wrap, h("div.empty", null, icon("folder"), h("p", { text: st.filter ? t("noMatches") : t("emptyFolder") }), canCreate() ? h("p.hint", { text: t("dropHint") }) : null)); return; }
     const body = h("tbody");
     for (const e of list) {
       const isSel = st.selected.has(e.name);
@@ -433,7 +466,7 @@
       if (!root.isConnected || !root.offsetParent || document.querySelector(".backdrop") || /INPUT|TEXTAREA/.test(document.activeElement && document.activeElement.tagName)) return;
       const sel = selectedEntries();
       if (e.key === "F2" && sel.length === 1 && canWrite()) { e.preventDefault(); rename(sel[0]); }
-      else if (e.key === "Delete" && sel.length && canWrite() && !U.trashRootOf(st.cwd)) { e.preventDefault(); remove(sel); }
+      else if (e.key === "Delete" && sel.length && canWrite()) { e.preventDefault(); if (U.trashRootOf(st.cwd)) purge(sel.map((x) => full(x.name)), false, sel[0].name); else remove(sel); }
       else if (e.key === "Enter" && sel.length === 1) { e.preventDefault(); open(sel[0]); }
       else if (e.key === "Backspace" && st.cwd !== "/") { e.preventDefault(); go(U.parent(st.cwd)); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") { e.preventDefault(); st.selected = new Set(visible().map((x) => x.name)); syncSelection(); }

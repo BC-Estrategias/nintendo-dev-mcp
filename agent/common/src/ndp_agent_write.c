@@ -389,3 +389,84 @@ size_t ndp_agent_rename(ndp_agent *a, const ndp_header *req, const uint8_t *pl, 
   ndp_tlv_put_str(&w, NDP_TAG_NEW_PATH, to);
   return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
 }
+
+/* FS_PURGE (spec §14): permanent deletion, ONLY of what is inside a trash ("<write root>/.ndp-trash"). `path` is an item in
+ * the trash (deleted for good) or the trash folder itself (emptied; the folder stays). The work is bounded per request
+ * (PURGE_BUDGET removals) and reports `more`: the caller repeats the same request until it says 0, so a huge trash never
+ * keeps the console busy for long. Nothing is remembered between requests: each one starts again from what is on disk. */
+#define PURGE_BUDGET 16
+
+size_t ndp_agent_purge(ndp_agent *a, const ndp_header *req, const uint8_t *pl, uint8_t *out, size_t cap) {
+  const ndp_fs_ops *fs = a->cfg.fs;
+  char cur[NDP_PATH_MAX + 1], name[NDP_COMPONENT_MAX + 1];
+  const char *detail = "";
+  ndp_fs_stat st;
+  ndp_tlv_w w;
+  size_t target_len;
+  uint32_t removed = 0;
+  int rc, budget = PURGE_BUDGET, done = 0, keep_target, target_is_file;
+
+  rc = resolve_write_path(a, req, pl, cur, &detail);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, detail, 0);
+  if (!in_any_trash(a, cur))
+    return ndp_agent_error(out, cap, req, NDP_ST_PROTECTED_PATH, "only items inside the trash can be permanently deleted", 0);
+  keep_target = is_a_trash_dir(a, cur);
+  target_len = strlen(cur);
+  rc = fs->stat(fs->ctx, cur, &st);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, rc == NDP_ST_NOT_FOUND ? "no such file or directory" : wdetail(rc), 0);
+  if (!st.is_dir && keep_target) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "the trash folder is unusable", 0);
+  target_is_file = !st.is_dir;
+  if (st.is_dir && !fs->remove_dir) return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_COMMAND, "this platform cannot remove folders", 0);
+
+  /* `cur` is always the target or something below it; going down appends "/name", going up cuts the last component. */
+  while (budget > 0 && !done) {
+    void *dir = NULL;
+    int found = 0, child_is_dir = 0;
+    if (target_is_file) { /* the target itself is a file */
+      if (fs->remove_file(fs->ctx, cur) != NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "could not delete the file", 0);
+      removed++;
+      done = 1;
+      break;
+    }
+    rc = fs->dir_open(fs->ctx, cur, &dir);
+    if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, "could not open a folder", 0);
+    rc = fs->dir_next(fs->ctx, dir, name, sizeof name, &st);
+    if (rc > 0) { found = 1; child_is_dir = st.is_dir; }
+    fs->dir_close(fs->ctx, dir);
+    if (rc < 0) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "could not read a folder", 0);
+    if (found) {
+      size_t n = strlen(cur);
+      if (n + 1 + strlen(name) > NDP_PATH_MAX) return ndp_agent_error(out, cap, req, NDP_ST_PATH_INVALID, "path too long", 0);
+      cur[n] = '/';
+      strcpy(cur + n + 1, name);
+      if (child_is_dir) continue; /* go down: emptied first, then removed on the way up */
+      if (fs->remove_file(fs->ctx, cur) != NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "could not delete a file", 0);
+      removed++;
+      budget--;
+      cur[n] = '\0';
+      continue;
+    }
+    /* `cur` is an empty folder */
+    if (strlen(cur) == target_len) {
+      if (!keep_target) {
+        if (fs->remove_dir(fs->ctx, cur) != NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "could not delete the folder", 0);
+        removed++;
+      }
+      done = 1;
+    } else {
+      char *slash = strrchr(cur, '/');
+      if (fs->remove_dir(fs->ctx, cur) != NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "could not delete a folder", 0);
+      removed++;
+      budget--;
+      *slash = '\0';
+    }
+  }
+
+  {
+    uint8_t more = done ? 0 : 1;
+    ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
+    ndp_tlv_put_u32(&w, NDP_TAG_PURGED, removed);
+    ndp_tlv_put(&w, NDP_TAG_PURGE_MORE, &more, 1);
+  }
+  return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
+}

@@ -315,6 +315,59 @@ suite("writes over TCP (DEVELOPMENT mode)", () => {
     assert.equal(existsSync(join(agentDir, "rm3.txt")), false, "the valid item was still processed");
   });
 
+  test("purge: deletes for good only inside the trash; big folders take several batches; refuses everything else", async () => {
+    const c = await connect();
+    await c.hello();
+    writeFileSync(join(agentDir, "pg1.txt"), "1");
+    const d1 = await c.delete(`${DIR}/pg1.txt`);
+    assert.deepEqual(await c.purge(d1.trashPath), { removed: 1, complete: true });
+    assert.equal(existsSync(join(agentDir, ".ndp-trash", "pg1.txt")), false);
+    assert.equal(await code(c.purge(d1.trashPath)), "NOT_FOUND");
+    // a folder with 60 files is deleted to the trash as a unit, then purged in batches
+    mkdirSync(join(agentDir, "pgdir"));
+    for (let i = 0; i < 60; i++) writeFileSync(join(agentDir, "pgdir", `f${i}`), "x");
+    const d2 = await c.delete(`${DIR}/pgdir`);
+    const steps: number[] = [];
+    const r = await c.purge(d2.trashPath, (n) => void steps.push(n));
+    assert.deepEqual(r, { removed: 61, complete: true });
+    assert.ok(steps.length >= 3 && steps.every((n, i) => i === 0 || n > steps[i - 1]!), `several growing batches (${steps.join(",")})`);
+    assert.equal(existsSync(join(agentDir, ".ndp-trash", "pgdir")), false);
+    // stopping early leaves the rest for the next call
+    mkdirSync(join(agentDir, "pgdir2"));
+    for (let i = 0; i < 60; i++) writeFileSync(join(agentDir, "pgdir2", `f${i}`), "x");
+    const d3 = await c.delete(`${DIR}/pgdir2`);
+    assert.equal((await c.purge(d3.trashPath, () => false)).complete, false);
+    assert.equal(existsSync(join(agentDir, ".ndp-trash", "pgdir2")), true);
+    assert.equal((await c.purge(d3.trashPath)).complete, true);
+    // empty the whole trash: the folder itself stays
+    writeFileSync(join(agentDir, "pg2.txt"), "2");
+    await c.delete(`${DIR}/pg2.txt`);
+    const all = await c.purge(`${DIR}/.ndp-trash`);
+    assert.equal(all.complete, true);
+    assert.deepEqual(readdirSync(join(agentDir, ".ndp-trash")), []);
+    // nothing outside a trash
+    writeFileSync(join(agentDir, "keep.txt"), "keep");
+    assert.equal(await code(c.purge(`${DIR}/keep.txt`)), "PROTECTED_PATH");
+    assert.equal(await code(c.purge(DIR)), "PROTECTED_PATH");
+    assert.equal(await code(c.purge("/luma")), "PROTECTED_PATH");
+    assert.equal(await code(c.purge(`${DIR}/config`)), "PROTECTED_PATH");
+    assert.equal(readFileSync(join(agentDir, "keep.txt"), "utf8"), "keep");
+    c.close();
+  });
+
+  test("CLI: purge deletes for good inside the trash and refuses anything else", async () => {
+    const target = `127.0.0.1:${port}`;
+    const cli = (...args: string[]) => run(process.execPath, [CLI, ...args], { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 });
+    writeFileSync(join(agentDir, "clip.txt"), "1");
+    await cli("rm", target, `${DIR}/clip.txt`);
+    const out = await cli("purge", target, `${DIR}/.ndp-trash/clip.txt`);
+    assert.match(out.stdout.toString(), /1 item\(s\) deleted for good/);
+    assert.equal(existsSync(join(agentDir, ".ndp-trash", "clip.txt")), false);
+    writeFileSync(join(agentDir, "clip2.txt"), "2");
+    await assert.rejects(cli("purge", target, `${DIR}/clip2.txt`), (e: { stderr: Buffer; code?: number }) => /PROTECTED_PATH/.test(e.stderr.toString()) && e.code === 1);
+    assert.equal(existsSync(join(agentDir, "clip2.txt")), true);
+  });
+
   test("CLI: put --text, put file, refuse overwrite, --replace, mkdir", async () => {
     const target = `127.0.0.1:${port}`;
     const cli = (...args: string[]) => run(process.execPath, [CLI, ...args], { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 });
@@ -349,6 +402,7 @@ suite("READ_ONLY mode forbids every write", () => {
       assert.equal(await code(c.mkdir(`${DIR}/d`)), "FORBIDDEN_MODE");
       writeFileSync(join(root, DIR, "keep.txt"), "keep");
       assert.equal(await code(c.delete(`${DIR}/keep.txt`)), "FORBIDDEN_MODE");
+      assert.equal(await code(c.purge(`${DIR}/.ndp-trash/x`)), "FORBIDDEN_MODE");
       assert.deepEqual(readdirSync(join(root, DIR)), ["keep.txt"]);
       c.close();
     } finally {

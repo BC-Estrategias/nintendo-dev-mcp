@@ -161,6 +161,13 @@ suite("web/js client against the C agent over a WebSocket", () => {
       const d = await c.delete(`${DIR}/sub/moved.bin`);
       assert.equal(d.trashPath, `${DIR}/.ndp-trash/moved.bin`);
       assert.equal(await c.rename(d.trashPath, `${DIR}/restored.bin`), `${DIR}/restored.bin`, "restore from the trash");
+      // permanent deletion: only inside the trash, in batches, with progress
+      const d2 = await c.delete(`${DIR}/restored.bin`);
+      const steps: number[] = [];
+      assert.deepEqual(await c.purge(d2.trashPath, (n: number) => void steps.push(n)), { removed: 1, complete: true });
+      assert.equal(existsSync(join(agentDir, ".ndp-trash", "restored.bin")), false);
+      assert.equal(await code(c.purge(`${DIR}/sub`)), "PROTECTED_PATH");
+      assert.equal(existsSync(join(agentDir, "sub")), true);
       assert.equal(await code(c.write("/luma/x.bin", big)), "PROTECTED_PATH");
       assert.equal((await c.accessInfo()).mode, "DEVELOPMENT");
       const info = await c.deviceInfo();

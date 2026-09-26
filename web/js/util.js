@@ -128,5 +128,26 @@
     return after === "" || after.startsWith("/") ? path.slice(0, i + "/.ndp-trash".length) : null;
   }
 
-  NDP.util = { inside, join, parent, basename, ext, crumbs, formatSize, formatRate, formatEta, isImage, isTextName, imageMime, looksBinary, uniqueName, nameProblem, sortEntries, writeProtected, accessOf, trashRootOf };
+  /** Collects downloaded bytes into Blobs of ~8 MiB: the browser can keep big Blobs on disk, so a large download does not
+   * sit in JavaScript memory as one huge list of arrays. `add` copies (the caller's buffer is reused). */
+  function blobCollector(groupBytes) {
+    const limit = groupBytes || 8 * 1024 * 1024;
+    const blobs = [];
+    let pending = [], pendingBytes = 0, total = 0;
+    return {
+      add(bytes) {
+        pending.push(bytes.slice());
+        pendingBytes += bytes.length;
+        total += bytes.length;
+        if (pendingBytes >= limit) { blobs.push(new Blob(pending)); pending = []; pendingBytes = 0; }
+      },
+      get size() { return total; },
+      blob(type) {
+        if (pending.length) { blobs.push(new Blob(pending)); pending = []; pendingBytes = 0; }
+        return new Blob(blobs, type ? { type } : undefined);
+      },
+    };
+  }
+
+  NDP.util = { blobCollector, inside, join, parent, basename, ext, crumbs, formatSize, formatRate, formatEta, isImage, isTextName, imageMime, looksBinary, uniqueName, nameProblem, sortEntries, writeProtected, accessOf, trashRootOf };
 })();
