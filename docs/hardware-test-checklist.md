@@ -171,7 +171,7 @@ Esperado: `model` (o seu New 3DS/XL), `firmware` (ex.: `11.17.0-50U`), `RAM 256.
 
 
 ## v1.2.x — página web servida pelo console
-Pré-requisitos: v1.2.1 (ou mais nova) instalada (CIA/3dsx), console na mesma rede do computador. A tela de cima mostra `Page   : http://<ip>:8080` e `Browser: not connected`.
+Pré-requisitos: v1.3.0 (ou mais nova) instalada (CIA/3dsx), console na mesma rede do computador. A tela de cima mostra `Page   : http://<ip>:8080` e `Browser: not connected`.
 1. No computador, abra `http://<ip>:8080`. **Anote** se a página carrega, quanto tempo leva (gzip ~47 KB) e se o Chrome/Safari mostra a tela "Parear este navegador".
 2. **Y** no console → digite o código na página, dê um nome, pareie. A tela de cima deve mostrar `Browser: CONNECTED <ip do computador>`. Recarregue a página: deve entrar sem pedir código de novo.
 3. Aba **Arquivos**: navegue até `/3ds/nintendo-dev-agent`. Em `READ_ONLY` os botões de escrita ficam desativados e há o aviso "modo somente leitura". Aperte **X** no console (DEVELOPMENT): a página deve permitir escrever **sem recarregar**? (o modo é lido na conexão; se não atualizar, recarregue e anote).
@@ -188,4 +188,12 @@ Pré-requisitos: v1.2.1 (ou mais nova) instalada (CIA/3dsx), console na mesma re
 3. Com o console em `READ_ONLY` (X), o botão fica desativado e `ndev purge <ip> <caminho na lixeira>` responde `FORBIDDEN_MODE`.
 4. `ndev purge <ip> /3ds/nintendo-dev-agent/algum.txt` (fora da lixeira) deve responder `PROTECTED_PATH`.
 5. Baixe um arquivo grande (>50 MiB) e veja a porcentagem no aviso e se a aba do navegador não incha demais.
+
+### v1.3.0 — copiar, recortar, mover, lixeira
+1. Marque 2 arquivos pequenos → **Copiar** → **Colar** na mesma pasta: aparecem `nome (1)`.
+2. Copie **um arquivo grande** (~50 MiB) para outra pasta com **Copiar para…**. **Anote a velocidade** que o diálogo mostra (a cópia é feita pelo console: deve ser bem mais rápida que 1 MiB/s) e confira o tamanho.
+3. Copie uma **pasta com subpastas** (cada `mkdir` leva ~6 s): confira a estimativa mostrada e que dá para **Cancelar**.
+4. Recorte + cole em outra pasta; teste um nome que já existe (ignorar / manter os dois / substituir → o antigo vai para a lixeira).
+5. O botão **Lixeira** da barra abre a lixeira da pasta liberada em que você está.
+6. No celular: um toque abre pastas; a caixinha seleciona.
 

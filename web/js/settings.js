@@ -76,6 +76,7 @@
     const prefs = card(t("preferences"),
       pref(t("language"), null, h("select", { onchange: (e) => { NDP.i18n.setLang(e.target.value); NDP.main.rerender(); } }, [["auto", t("langAuto")], ["pt-BR", "Português (Brasil)"], ["en", "English"]].map(([v, l]) => h("option", { value: v, text: l, selected: NDP.i18n.choice() === v })))),
       pref(t("theme"), null, h("select", { onchange: (e) => { NDP.prefs.set("theme", e.target.value); NDP.main.applyTheme(); } }, [["auto", t("themeAuto")], ["light", t("themeLight")], ["dark", t("themeDark")]].map(([v, l]) => h("option", { value: v, text: l, selected: NDP.prefs.theme === v })))),
+      pref(t("openOnClick"), t("openOnClickHint"), toggle("openOnClick")),
       pref(t("showHidden"), t("showHiddenHint"), toggle("showHidden")),
       pref(t("confirmDelete"), t("confirmDeleteHint"), toggle("confirmDelete")),
       pref(t("backupOnSave"), t("backupOnSaveHint"), toggle("backupOnSave")));

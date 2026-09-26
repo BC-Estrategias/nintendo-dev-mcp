@@ -1,18 +1,13 @@
 # Changelog
 
-## 1.2.2
-- **Delete forever / Empty trash.** New command `FS_PURGE` (0x0034): permanently deletes items that are **inside a trash folder** (or empties it), only in DEVELOPMENT mode and only in writable folders; it works in small batches so a huge trash never keeps the console busy, and the page shows the count with a Cancel button. Also `ndev purge`. The MCP server does **not** get it: an assistant still cannot destroy data.
-- Large downloads no longer sit in memory as one big list: the page assembles them in 8 MiB blocks (the browser can keep those on disk) and shows the percentage.
-
-## 1.2.1
-- Two browser tabs (or two browsers) no longer fight over the console: the console has one page connection, and the page that gets replaced is told (WebSocket close 4001) and shows "opened somewhere else" with a *Use this tab* button, instead of reconnecting and evicting the other one every few seconds.
-- 1.2.0 was a test build that was never published; everything below shipped first in 1.2.1.
-
-## 1.2.0
-- **Web page served by the console.** The 3DS app now serves a file manager on port 8080 (address on the top screen; **R** turns it off/on): browse the SD card, view images, edit text files (atomic save, optional `.bak`), **drag and drop** files and folders to upload (SHA-256 checked by the console, conflict handling), download, rename/move, move to the trash and restore, plus Settings (device, SD and memory, opened folders, pairing, preferences) and an FAQ with the local MCP install steps. Portuguese and English. Same pairing, same modes and same folders as the CLI: the page cannot change any of them.
-- New command `FS_RENAME` (0x0032): move/rename without ever overwriting (also `ndev mv` and the MCP tool `nintendo_fs_move`).
-- NDP over WebSocket (spec §15) with Host/Origin checks against DNS rebinding and cross-site use; the raw NDP client and the page are independent, so the MCP server keeps working while the page is open.
-- The page ships its own SHA-256/HMAC (plain `http://` has no `crypto.subtle`), verified against the same test vectors as the C and TypeScript implementations.
+## 1.3.0 — first release with the web page
+(1.2.0–1.2.2 were test builds that were never published; everything below is new in this release.)
+- **Web page served by the console.** The 3DS app serves a file manager on port 8080 (address on the top screen; **R** turns it off/on): browse the SD card, view images, edit text files (atomic save, optional `.bak`), **drag and drop** files and folders to upload (SHA-256 checked by the console, conflict handling), download, plus Settings (device, SD and memory, opened folders, pairing, preferences) and an FAQ with the local MCP install steps. Portuguese and English, light/dark, phone friendly (one tap opens folders; checkboxes select). Same pairing, modes and folders as the CLI: the page cannot change any of them.
+- **Organize:** checkbox selection, cut / copy / paste, *Move to…* / *Copy to…* with a folder picker, drag onto a folder to move, keyboard shortcuts, a **Trash** shortcut, restore, and **Delete forever / Empty trash**.
+- New commands: `FS_RENAME` (0x0032, `ndev mv`, MCP `nintendo_fs_move`), `FS_PURGE` (0x0034, `ndev purge`; deletes for good but **only inside a trash**, in batches, DEVELOPMENT mode; not exposed through the MCP), `FS_COPY` (0x0035, `ndev cp`; the console copies one file in bounded steps and renames it into place, never overwrites; folders are copied file by file by the page).
+- NDP over WebSocket (spec §15) with Host/Origin checks against DNS rebinding and cross-site use; the raw NDP client and the page are independent, so the MCP server keeps working while the page is open. Two tabs no longer fight over the connection (the replaced one is told, WebSocket close 4001).
+- The page ships its own SHA-256/HMAC (plain `http://` has no `crypto.subtle`), verified against the same test vectors as the C and TypeScript implementations. A refused stored key is no longer deleted from the browser; the pairing code field formats itself and pairs as soon as it is complete.
+- Large downloads are assembled in 8 MiB blocks (the browser can keep them on disk) with a percentage; uploads warn about files of 4 GiB or more (FAT32) and about not enough free space.
 
 ## 1.1.1
 - The 3DS agent no longer reports `app_mem_*` (it always read 0 free of the agent's own 64 MB mode, which is misleading). Found on the first hardware run of `DEVICE_INFO`.

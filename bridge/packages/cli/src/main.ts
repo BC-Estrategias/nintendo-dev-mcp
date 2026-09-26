@@ -38,6 +38,7 @@ Usage:
   ndev mv    <host[:port]> <from> <to>            move/rename a file or folder (never overwrites; also restores from the trash)
   ndev purge <host[:port]> <path>...              PERMANENTLY delete items inside a trash folder (<root>/.ndp-trash/...), or
                                                   empty a trash by giving the folder itself; refuses anything else
+  ndev cp    <host[:port]> <from> <to>            copy ONE file on the card (done by the console; never overwrites)
   ndev rm    <host[:port]> <path>...              move files/folders to the device's trash
                                                   (<write root>/.ndp-trash/); nothing is destroyed
 
@@ -177,7 +178,7 @@ async function main(argv: string[]): Promise<number> {
       client.close();
     }
   }
-  if (!["hello", "ping", "info", "access", "ls", "stat", "cat", "get", "put", "mkdir", "mv", "rm", "purge"].includes(cmd) || !target) {
+  if (!["hello", "ping", "info", "access", "ls", "stat", "cat", "get", "put", "mkdir", "mv", "cp", "rm", "purge"].includes(cmd) || !target) {
     console.error(USAGE);
     return 2;
   }
@@ -289,6 +290,16 @@ async function main(argv: string[]): Promise<number> {
     if (!from || !to) throw new Error("mv needs <from> and <to>");
     return withClient(target, async (client) => {
       console.log(`${from} -> ${await client.rename(from, to)}`);
+      return 0;
+    });
+  }
+
+  if (cmd === "cp") {
+    const [from, to] = parseFlags(rest, []).rest;
+    if (!from || !to) throw new Error("cp needs <from> and <to>");
+    return withClient(target, async (client) => {
+      const r = await client.copy(from, to);
+      console.log(`${from} -> ${to} (${r.bytes} bytes)`);
       return 0;
     });
   }

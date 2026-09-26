@@ -466,7 +466,114 @@ size_t ndp_agent_purge(ndp_agent *a, const ndp_header *req, const uint8_t *pl, u
     uint8_t more = done ? 0 : 1;
     ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
     ndp_tlv_put_u32(&w, NDP_TAG_PURGED, removed);
-    ndp_tlv_put(&w, NDP_TAG_PURGE_MORE, &more, 1);
+    ndp_tlv_put(&w, NDP_TAG_MORE, &more, 1);
+  }
+  return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
+}
+
+/* FS_COPY (spec §14): copies ONE file inside the card, in bounded steps. Each request copies up to COPY_BUDGET more bytes
+ * into "<dest>.ndp-tmp" and answers {copied, total_size, more}; the caller repeats until `more` is 0, and only then the
+ * temporary file is renamed into place, so an interrupted copy never leaves a half-written destination. The step's position is
+ * the size of the temporary file (nothing else is remembered). copy_mode: 1 = start (drop any leftover temporary),
+ * 0 = continue (default), 2 = discard the partial copy. The scratch buffer is the response buffer itself. */
+#define COPY_BUDGET (1024u * 1024u)
+#define COPY_CHUNK_MAX 32768u
+
+size_t ndp_agent_copy(ndp_agent *a, const ndp_header *req, const uint8_t *pl, uint8_t *out, size_t cap) {
+  const ndp_fs_ops *fs = a->cfg.fs;
+  char from[NDP_PATH_MAX + 1], to[NDP_PATH_MAX + 1], tmp[NDP_PATH_MAX + 16];
+  const uint8_t *v;
+  size_t l, chunk;
+  ndp_fs_stat st;
+  ndp_tlv_w w;
+  void *src = NULL, *dst = NULL;
+  uint64_t offset = 0, total, done = 0;
+  int rc, mode = 0;
+
+  if (!ndp_tlv_find(pl, req->payload_len, NDP_TAG_PATH, &v, &l)) return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "path required", 0);
+  rc = ndp_policy_check(&a->policy, a->cfg.mode, 0, v, l, from);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, "the source is not readable by policy", 0);
+  if (!ndp_tlv_find(pl, req->payload_len, NDP_TAG_NEW_PATH, &v, &l)) return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "new_path required", 0);
+  rc = ndp_policy_check(&a->policy, a->cfg.mode, 1, v, l, to);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, wdetail(rc), 0);
+  if (ndp_tlv_find(pl, req->payload_len, NDP_TAG_COPY_MODE, &v, &l)) {
+    if (l != 1 || v[0] > 2) return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "copy_mode must be 0, 1 or 2", 0);
+    mode = v[0];
+  }
+  if (has_suffix(to, SUFFIX_TMP) || has_suffix(to, SUFFIX_OLD) || has_suffix(to, SUFFIX_BAK))
+    return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "reserved file name suffix", 0);
+  if (strcmp(to, "/") == 0 || is_configured_root(a, to)) return ndp_agent_error(out, cap, req, NDP_ST_EXISTS, wdetail(NDP_ST_EXISTS), 0);
+  if (in_any_trash(a, to)) return ndp_agent_error(out, cap, req, NDP_ST_PROTECTED_PATH, "items enter the trash only by deleting them", 0);
+  if (ndp_path_inside(from, to) && ndp_path_inside(to, from)) return ndp_agent_error(out, cap, req, NDP_ST_EXISTS, "source and destination are the same", 0);
+  if (with_suffix(to, SUFFIX_TMP, tmp, sizeof tmp) != NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_PATH_INVALID, "file name too long for the temporary name", 0);
+
+  if (mode == 2) { /* discard */
+    if (fs->stat(fs->ctx, tmp, &st) == NDP_OK && !st.is_dir) (void)fs->remove_file(fs->ctx, tmp);
+    ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
+    ndp_tlv_put_u64(&w, NDP_TAG_COPIED, 0);
+    { uint8_t zero = 0; ndp_tlv_put(&w, NDP_TAG_MORE, &zero, 1); }
+    return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
+  }
+
+  rc = fs->stat(fs->ctx, from, &st);
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, rc == NDP_ST_NOT_FOUND ? "no such file" : wdetail(rc), 0);
+  if (st.is_dir) return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "only files are copied by this command", 0);
+  total = st.size;
+  parent_of(to, tmp); /* scratch: the destination folder (the temporary name is rebuilt below) */
+  rc = fs->stat(fs->ctx, tmp, &st);
+  if (rc != NDP_OK || !st.is_dir) return ndp_agent_error(out, cap, req, NDP_ST_NOT_FOUND, "destination folder does not exist", 0);
+  if (fs->stat(fs->ctx, to, &st) == NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_EXISTS, wdetail(NDP_ST_EXISTS), 0);
+  (void)with_suffix(to, SUFFIX_TMP, tmp, sizeof tmp);
+
+  if (mode == 1 && fs->stat(fs->ctx, tmp, &st) == NDP_OK && !st.is_dir) (void)fs->remove_file(fs->ctx, tmp);
+  if (fs->stat(fs->ctx, tmp, &st) == NDP_OK) {
+    if (st.is_dir || st.size > total) { (void)fs->remove_file(fs->ctx, tmp); return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "the partial copy is unusable: start again", 0); }
+    offset = st.size;
+  }
+
+  if (!fs->file_append) return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_COMMAND, "this platform cannot copy", 0);
+  chunk = cap > NDP_HEADER_SIZE + NDP_MAC_SIZE + 512 ? cap - NDP_HEADER_SIZE - NDP_MAC_SIZE : 0;
+  if (chunk > COPY_CHUNK_MAX) chunk = COPY_CHUNK_MAX;
+  if (chunk == 0) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "no scratch space", 0);
+  rc = fs->file_append(fs->ctx, tmp, &dst); /* creates the temporary when this is the first step (also for an empty source) */
+  if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, wdetail(rc), 0);
+  if (offset < total) {
+    rc = fs->file_open(fs->ctx, from, &src);
+    if (rc == NDP_OK && offset > 0) rc = fs->file_seek(fs->ctx, src, offset);
+    if (rc != NDP_OK) {
+      if (src) fs->file_close(fs->ctx, src);
+      fs->file_close(fs->ctx, dst);
+      return ndp_agent_error(out, cap, req, (uint16_t)(rc > 0 ? rc : NDP_ST_IO_ERROR), "could not read the source", 0);
+    }
+    while (done < COPY_BUDGET && offset + done < total) {
+      uint64_t left = total - offset - done;
+      size_t want = left < chunk ? (size_t)left : chunk;
+      long r = fs->file_read(fs->ctx, src, out + NDP_HEADER_SIZE, want);
+      long wr;
+      if (r <= 0) { rc = NDP_ST_IO_ERROR; break; } /* a source that shrank, or a read error */
+      wr = fs->file_write(fs->ctx, dst, out + NDP_HEADER_SIZE, (size_t)r);
+      if (wr != r) { rc = wr < 0 ? -(int)wr : NDP_ST_IO_ERROR; break; }
+      done += (uint64_t)r;
+    }
+    fs->file_close(fs->ctx, src);
+    if (rc != NDP_OK) {
+      fs->file_close(fs->ctx, dst);
+      return ndp_agent_error(out, cap, req, (uint16_t)rc, rc == NDP_ST_NO_SPACE ? wdetail(rc) : "copy failed (the partial copy is kept: start again or discard it)", 0);
+    }
+  }
+  if (offset + done >= total) {
+    if (fs->file_sync) (void)fs->file_sync(fs->ctx, dst);
+    fs->file_close(fs->ctx, dst);
+    if (fs->rename(fs->ctx, tmp, to) != NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_IO_ERROR, "could not finish the copy", 0);
+  } else {
+    fs->file_close(fs->ctx, dst);
+  }
+  {
+    uint8_t more = offset + done >= total ? 0 : 1;
+    ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
+    ndp_tlv_put_u64(&w, NDP_TAG_COPIED, offset + done);
+    ndp_tlv_put_u64(&w, NDP_TAG_TOTAL_SIZE, total);
+    ndp_tlv_put(&w, NDP_TAG_MORE, &more, 1);
   }
   return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
 }

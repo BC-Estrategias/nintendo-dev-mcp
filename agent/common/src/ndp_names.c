@@ -14,6 +14,7 @@ const char *ndp_command_name(uint16_t command) {
     case NDP_CMD_FS_RENAME: return "FS_RENAME";
     case NDP_CMD_FS_DELETE: return "FS_DELETE";
     case NDP_CMD_FS_PURGE: return "FS_PURGE";
+    case NDP_CMD_FS_COPY: return "FS_COPY";
     default: return "?";
   }
 }

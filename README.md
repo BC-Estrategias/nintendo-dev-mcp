@@ -7,13 +7,13 @@ AI agent ⇄ MCP (stdio) ⇄ ndev bridge (your computer) ⇄ NDP v1 over TCP/Wi-
 Browser ⇄ the same page, served by the 3DS app on port 8080 (NDP over WebSocket) ⇄ ┘
 ```
 
-**Status (v1.2.2):** usable and tested on a New 3DS with Luma3DS 13.3.3 — read/write/delete-to-trash on the SD card, pairing with per-frame HMAC, folders chosen on the console, CLI, MCP server and a **web file manager served by the console itself**. Design notes and dead ends (3GX plugin inside a game, replacing the Game Notes applet) are in [`docs/research/`](docs/research).
+**Status (v1.3.0):** usable and tested on a New 3DS with Luma3DS 13.3.3 — read/write/delete-to-trash on the SD card, pairing with per-frame HMAC, folders chosen on the console, CLI, MCP server and a **web file manager served by the console itself**. Design notes and dead ends (3GX plugin inside a game, replacing the Game Notes applet) are in [`docs/research/`](docs/research).
 
 > This drives **real hardware**. Writes modify a real SD card. Read the safety model below before you enable them.
 
 ## What you get
 - **A web page served by the 3DS** — open `http://<console-ip>:8080` (the address is on the console's top screen) in any browser on your network: browse the SD card, **drag and drop** to upload, view images, edit text files, download, rename, move to the trash and restore, see the console's storage, and read an FAQ (with how to install the local MCP). It replaces an FTP client and needs nothing installed. Portuguese and English. **R** on the console turns it off.
-- **`ndev` CLI** — `find`, `info` (model, firmware, memory, SD space), `ls`, `cat`, `get`, `put`, `mkdir`, `mv`, `rm` (moves to a trash folder), `purge` (deletes for good, only inside a trash folder), `pair`, `access`.
+- **`ndev` CLI** — `find`, `info` (model, firmware, memory, SD space), `ls`, `cat`, `get`, `put`, `mkdir`, `mv`, `cp` (the console copies one file), `rm` (moves to a trash folder), `purge` (deletes for good, only inside a trash folder), `pair`, `access`.
 - **MCP server** (`@ndev/mcp`, 13 tools `nintendo_*`) — device info, list/stat/read/write/mkdir/move/delete, upload/download to a local sandbox folder, agent log. Auto-discovers the console when its IP changes (DHCP).
 - **3DS agent** — a normal 3DS app (`.3dsx` or `.cia`) with a small on-screen UI.
 

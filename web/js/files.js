@@ -9,7 +9,7 @@
   const t = (...a) => NDP.i18n.t(...a);
 
   const st = { cwd: "/", entries: [], selected: new Set(), sort: { key: "name", dir: "asc" }, filter: "", loading: false, error: null, last: null };
-  let root, uploads = [], upBusy = false, upPanel = null;
+  let root, uploads = [], upBusy = false, upPanel = null, clip = null; // clip: {mode: "cut"|"copy", dir, entries}
   const prefs = () => NDP.prefs;
 
   const hashPath = () => "#" + st.cwd;
@@ -42,7 +42,8 @@
     } catch (e) {
       st.entries = [];
       st.error = e;
-      if (e.statusName === "NOT_FOUND" && st.cwd !== "/") { st.loading = false; return load(U.parent(st.cwd)); }
+      if (e.statusName === "NOT_FOUND" && U.trashRootOf(st.cwd) === st.cwd) st.error = null; // the trash is created by the first deletion: until then it is simply empty
+      else if (e.statusName === "NOT_FOUND" && st.cwd !== "/") { st.loading = false; return load(U.parent(st.cwd)); }
     }
     st.loading = false;
     if (opts.keepSelection) st.selected = new Set([...st.selected].filter((n) => st.entries.some((e) => e.name === n)));
@@ -124,13 +125,59 @@
   }
 
   async function moveInto(names, targetDir) {
-    let n = 0;
-    for (const name of names) {
-      if (full(name) === targetDir) continue;
-      try { await S.run((c) => c.rename(full(name), U.join(targetDir, name))); n++; } catch (e) { fail(e, name); }
-    }
-    if (n) toast(t("moved", n), "ok", 2500);
+    const entries = st.entries.filter((e) => names.includes(e.name)).map((e) => ({ name: e.name, type: e.type, size: e.size }));
+    if (!entries.length) return;
+    await NDP.transfer.run({ mode: "move", entries, srcDir: st.cwd, destDir: targetDir });
+    st.selected.clear();
     await refresh();
+  }
+
+  // ---------------------------------------------------------------------------------------------- clipboard, move/copy to..., trash shortcut
+  const canPickDest = (p) => U.accessOf(p, S.access, S.info && S.info.mode) === "write" && !U.trashRootOf(p);
+  const sameNames = (list) => list.map((e) => ({ name: e.name, type: e.type, size: e.size }));
+
+  function setClip(mode) {
+    const sel = selectedEntries();
+    if (!sel.length) return;
+    clip = { mode, dir: st.cwd, entries: sameNames(sel) };
+    toast(t(mode === "cut" ? "cutN" : "copiedToClipboard", sel.length), "info", 2500);
+    syncSelection();
+  }
+
+  async function paste() {
+    if (!clip || !canCreate()) return;
+    const c = clip;
+    const r = await NDP.transfer.run({ mode: c.mode === "cut" ? "move" : "copy", entries: c.entries, srcDir: c.dir, destDir: st.cwd });
+    if (c.mode === "cut" && !r.cancelled && !r.failed) clip = null;
+    st.selected.clear();
+    await refresh();
+  }
+
+  async function transferTo(mode) {
+    const sel = selectedEntries();
+    if (!sel.length) return;
+    const dest = await NDP.transfer.pickFolder({ title: t(mode === "move" ? "moveTo" : "copyTo"), okLabel: t(mode === "move" ? "moveHere" : "copyHere"), start: st.cwd, canPick: canPickDest });
+    if (!dest) return;
+    await NDP.transfer.run({ mode, entries: sameNames(sel), srcDir: st.cwd, destDir: dest });
+    st.selected.clear();
+    await refresh();
+  }
+
+  /** The trash that FS_DELETE uses for what is in this folder: "<most specific writable root>/.ndp-trash". */
+  function trashTargets() {
+    const roots = (S.access && S.access.writeRoots) || [];
+    let best = null;
+    for (const r of roots) if (U.inside(st.cwd, r) && (best === null || r.length > best.length)) best = r;
+    return (best !== null ? [best] : roots).map((r) => (r === "/" ? "/.ndp-trash" : r + "/.ndp-trash"));
+  }
+  function openTrash(ev) {
+    const inside = U.trashRootOf(st.cwd);
+    if (inside) return go(U.parent(inside));
+    const list = trashTargets();
+    if (!list.length) { toast(t("noTrashYet"), "info", 4000); return; }
+    if (list.length === 1) return go(list[0]);
+    const r = ev.currentTarget.getBoundingClientRect();
+    contextMenu(r.left, r.bottom + 4, list.map((p) => ({ label: p, icon: "trash", run: () => go(p) })));
   }
 
   async function restore(entry) {
@@ -347,6 +394,12 @@
       inTrash && !(one && one.name === ".ndp-trash") ? { label: t("deleteForever"), icon: "trash", danger: true, disabled: !writable, run: () => purge(sel.map((e) => full(e.name)), false, sel[0].name) } : { label: t("moveToTrash"), icon: "trash", danger: true, disabled: !writable || inTrash, run: () => remove(sel) },
       one && one.name === ".ndp-trash" && one.type === "dir" && !U.trashRootOf(st.cwd) ? { label: t("emptyTrash"), icon: "trash", danger: true, disabled: !writable, run: () => purge([full(one.name)], true) } : null,
       "-",
+      { label: t("cut"), icon: "cut", disabled: !writable || (inTrash && !U.trashRootOf(st.cwd)), run: () => setClip("cut") },
+      { label: t("copy"), icon: "copy", run: () => setClip("copy") },
+      clip && canCreate() ? { label: t("pasteN", clip.entries.length), icon: "paste", run: paste } : null,
+      { label: t("moveTo"), icon: "move", disabled: !writable, run: () => transferTo("move") },
+      { label: t("copyTo"), icon: "copy", run: () => transferTo("copy") },
+      "-",
       one && { label: t("copyPath"), icon: "copy", run: () => copyText(full(one.name)) },
     ].filter(Boolean));
   }
@@ -375,22 +428,43 @@
   function renderActions() {
     if (!actionsEl) return;
     const writable = canWrite(), list = visible(), sel = selectedEntries();
+    const one = sel.length === 1 ? sel[0] : null;
+    const trashRoot = U.trashRootOf(st.cwd);
     fill(actionsEl,
-      h("button", { disabled: !canCreate(), onclick: () => filePicker.click() }, icon("upload"), t("upload")),
-      h("button", { disabled: !canCreate(), onclick: newFolder }, icon("plus"), t("newFolder")),
-      h("button", { disabled: !canCreate(), onclick: newFile }, icon("newfile"), t("newFile")),
+      h("button", { disabled: !canCreate(), onclick: () => filePicker.click() }, icon("upload"), h("span", { text: t("upload") })),
+      h("button", { disabled: !canCreate(), onclick: newFolder }, icon("plus"), h("span", { text: t("newFolder") })),
+      h("button", { disabled: !canCreate(), onclick: newFile }, icon("newfile"), h("span", { text: t("newFile") })),
+      h("button" + (trashRoot ? "" : ".trashbtn"), { onclick: openTrash, title: t("trashShortcutHint") }, icon("trash"), h("span", { text: trashRoot ? t("leaveTrash") : t("trash") })),
       h("span.sep-v"),
-      h("button", { disabled: !(sel.length === 1 && sel[0].type === "file"), onclick: () => download(sel[0]) }, icon("download"), t("download")),
-      h("button", { disabled: !(sel.length === 1 && writable), onclick: () => rename(sel[0]) }, icon("edit"), t("rename")),
-      inTrash() ? null : h("button.danger", { disabled: !(sel.length && writable), onclick: () => remove(sel) }, icon("trash"), t("moveToTrash")),
-      inTrash() ? h("button.danger", { disabled: !(sel.length && writable), onclick: () => purge(sel.map((e) => full(e.name)), false, sel[0].name) }, icon("trash"), t("deleteForever")) : null,
-      inTrash() ? h("button.danger", { disabled: !(writable && list.length), onclick: () => purge([U.trashRootOf(st.cwd)], true) }, icon("trash"), t("emptyTrash")) : null,
+      h("button", { disabled: !(one && one.type === "file"), onclick: () => download(one) }, icon("download"), h("span", { text: t("download") })),
+      h("button", { disabled: !(one && writable), onclick: () => rename(one) }, icon("edit"), h("span", { text: t("rename") })),
+      h("button", { disabled: !(sel.length && writable), onclick: () => setClip("cut") }, icon("cut"), h("span", { text: t("cut") })),
+      h("button", { disabled: !sel.length, onclick: () => setClip("copy") }, icon("copy"), h("span", { text: t("copy") })),
+      h("button", { disabled: !(clip && canCreate()), onclick: paste, title: clip ? t("pasteHint", clip.entries.length, clip.dir) : "" }, icon("paste"), h("span", { text: clip ? t("pasteN", clip.entries.length) : t("paste") })),
+      h("button", { disabled: !(sel.length && writable), onclick: () => transferTo("move") }, icon("move"), h("span", { text: t("moveTo") })),
+      h("button", { disabled: !sel.length, onclick: () => transferTo("copy") }, icon("copy"), h("span", { text: t("copyTo") })),
+      h("span.sep-v"),
+      inTrash() ? null : h("button.danger", { disabled: !(sel.length && writable), onclick: () => remove(sel) }, icon("trash"), h("span", { text: t("moveToTrash") })),
+      inTrash() ? h("button.danger", { disabled: !(sel.length && writable), onclick: () => purge(sel.map((e) => full(e.name)), false, sel[0].name) }, icon("trash"), h("span", { text: t("deleteForever") })) : null,
+      inTrash() ? h("button.danger", { disabled: !(writable && list.length), onclick: () => purge([trashRoot], true) }, icon("trash"), h("span", { text: t("emptyTrash") })) : null,
       h("span.grow"),
       h("span.count", { text: t("itemsCount", list.length) + (sel.length ? " · " + t("selectedN", sel.length) : "") }));
   }
 
   function syncSelection() {
-    for (const tr of root.querySelectorAll("tbody tr")) tr.classList.toggle("selected", st.selected.has(tr.dataset.name));
+    for (const tr of root.querySelectorAll("tbody tr")) {
+      const on = st.selected.has(tr.dataset.name);
+      tr.classList.toggle("selected", on);
+      tr.classList.toggle("cut", !!clip && clip.mode === "cut" && clip.dir === st.cwd && clip.entries.some((x) => x.name === tr.dataset.name));
+      const cb = tr.querySelector("input.cb");
+      if (cb) cb.checked = on;
+    }
+    const head = root.querySelector("input.cball");
+    if (head) {
+      const names = visible().map((x) => x.name), n = names.filter((x) => st.selected.has(x)).length;
+      head.checked = n > 0 && n === names.length;
+      head.indeterminate = n > 0 && n < names.length;
+    }
     renderActions();
   }
 
@@ -416,17 +490,22 @@
     if (st.error) { wrap.replaceChildren(); return; }
     if (!list.length) { fill(wrap, h("div.empty", null, icon("folder"), h("p", { text: st.filter ? t("noMatches") : t("emptyFolder") }), canCreate() ? h("p.hint", { text: t("dropHint") }) : null)); return; }
     const body = h("tbody");
+    const single = () => !!prefs().openOnClick;
+    const toggle = (name, on) => { if (on === undefined ? st.selected.has(name) : !on) st.selected.delete(name); else st.selected.add(name); };
     for (const e of list) {
       const isSel = st.selected.has(e.name);
-      const tr = h("tr" + (isSel ? ".selected" : "") + (e.type === "dir" ? ".dir" : ""), { draggable: canWrite() ? "true" : undefined, dataset: { name: e.name },
+      const isCut = !!clip && clip.mode === "cut" && clip.dir === st.cwd && clip.entries.some((x) => x.name === e.name);
+      const tr = h("tr" + (isSel ? ".selected" : "") + (isCut ? ".cut" : "") + (e.type === "dir" ? ".dir" : ""), { draggable: canWrite() ? "true" : undefined, dataset: { name: e.name },
         onclick: (ev) => {
-          if (ev.ctrlKey || ev.metaKey) { st.selected.has(e.name) ? st.selected.delete(e.name) : st.selected.add(e.name); }
+          if (ev.target.closest(".cbcell")) return;
+          if (ev.ctrlKey || ev.metaKey) { toggle(e.name); }
           else if (ev.shiftKey && st.last) { const names = list.map((x) => x.name), a = names.indexOf(st.last), b = names.indexOf(e.name); st.selected = new Set(names.slice(Math.min(a, b), Math.max(a, b) + 1)); }
+          else if (single()) { open(e); return; } // one tap opens (phones): selecting is what the checkbox is for
           else st.selected = new Set([e.name]);
           st.last = e.name;
           syncSelection();
         },
-        ondblclick: () => open(e), oncontextmenu: (ev) => rowMenu(ev, e),
+        ondblclick: (ev) => { if (!single() && !ev.target.closest(".cbcell")) open(e); }, oncontextmenu: (ev) => rowMenu(ev, e),
         ondragstart: (ev) => { if (!st.selected.has(e.name)) st.selected = new Set([e.name]); ev.dataTransfer.setData("application/x-ndev-names", JSON.stringify([...st.selected])); ev.dataTransfer.effectAllowed = "move"; },
         ondragover: (ev) => { if (e.type === "dir" && canWrite()) { ev.preventDefault(); tr.classList.add("droptarget"); } },
         ondragleave: () => tr.classList.remove("droptarget"),
@@ -439,12 +518,16 @@
           if (internal) { await moveInto(JSON.parse(internal).filter((n) => n !== e.name), full(e.name)); return; }
           await startUpload(await itemsFromDrop(ev.dataTransfer, full(e.name)), full(e.name));
         } },
+        h("td.cbcell", { onclick: (ev) => ev.stopPropagation() }, h("input.cb", { type: "checkbox", checked: isSel, "aria-label": e.name, onchange: (ev) => { toggle(e.name, ev.target.checked); st.last = e.name; syncSelection(); } })),
         h("td.name", null, icon(e.type === "dir" ? "folder" : U.isImage(e.name) ? "image" : "file", "ico " + e.type), h("span.fname", { text: e.name })),
         h("td.size", { text: e.type === "dir" ? "" : U.formatSize(e.size) }),
         h("td.kind", { text: e.type === "dir" ? t("folder") : (U.ext(e.name) || t("file")).toUpperCase() }));
       body.append(tr);
     }
-    fill(wrap, h("table.files", null, h("thead", null, h("tr", null, sortHeader("name", t("name")), sortHeader("size", t("size")), h("th", { text: t("type") }))), body));
+    const names = list.map((x) => x.name), nsel = names.filter((x) => st.selected.has(x)).length;
+    const headCb = h("input.cball", { type: "checkbox", checked: nsel > 0 && nsel === names.length, "aria-label": t("selectAll"), onchange: (ev) => { if (ev.target.checked) names.forEach((n) => st.selected.add(n)); else names.forEach((n) => st.selected.delete(n)); syncSelection(); } });
+    headCb.indeterminate = nsel > 0 && nsel < names.length;
+    fill(wrap, h("table.files", null, h("thead", null, h("tr", null, h("th.cbcell", null, headCb), sortHeader("name", t("name")), sortHeader("size", t("size")), h("th", { text: t("type") }))), body));
   }
 
   const dropOverlay = h("div#dropoverlay", null, icon("upload"), h("p", { text: "" }));
@@ -468,6 +551,10 @@
       if (e.key === "F2" && sel.length === 1 && canWrite()) { e.preventDefault(); rename(sel[0]); }
       else if (e.key === "Delete" && sel.length && canWrite()) { e.preventDefault(); if (U.trashRootOf(st.cwd)) purge(sel.map((x) => full(x.name)), false, sel[0].name); else remove(sel); }
       else if (e.key === "Enter" && sel.length === 1) { e.preventDefault(); open(sel[0]); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && sel.length) { e.preventDefault(); setClip("copy"); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x" && sel.length && canWrite()) { e.preventDefault(); setClip("cut"); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && clip && canCreate()) { e.preventDefault(); paste(); }
+      else if (e.key === "Escape" && (sel.length || clip)) { st.selected.clear(); clip = null; syncSelection(); }
       else if (e.key === "Backspace" && st.cwd !== "/") { e.preventDefault(); go(U.parent(st.cwd)); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") { e.preventDefault(); st.selected = new Set(visible().map((x) => x.name)); syncSelection(); }
       else if (e.key === "F5") { e.preventDefault(); refresh(); }

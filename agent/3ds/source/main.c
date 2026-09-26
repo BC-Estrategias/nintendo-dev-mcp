@@ -159,6 +159,12 @@ static int fs_remove(void *ctx, const char *path) {
   return rc;
 }
 
+static int fs_file_append(void *ctx, const char *path, void **file) {
+  uint64_t t0 = now_ms(NULL);
+  int rc = g_fs_base.file_append(ctx, path, file);
+  slow_check("file_append", path, t0);
+  return rc;
+}
 static int fs_remove_dir(void *ctx, const char *path) {
   uint64_t t0 = now_ms(NULL);
   int rc = g_fs_base.remove_dir(ctx, path);
@@ -573,6 +579,7 @@ int main(void) {
     g_fs.rename = fs_rename;
     g_fs.remove_file = fs_remove;
     g_fs.remove_dir = fs_remove_dir;
+    g_fs.file_append = fs_file_append;
     cfg.fs = &g_fs; /* default policy: read everything except the agent's config; no writes */
   }
   memset(&plat, 0, sizeof plat);

@@ -258,6 +258,27 @@
       return { trashPath: t.str(Tag.TRASH_PATH) };
     }
 
+    /** Copies ONE file on the card (done by the console in bounded steps; never overwrites). `onProgress(copied, total)`;
+     * `signal` aborts between steps and discards the partial copy. */
+    async copy(from, to, opts) {
+      const o = opts || {};
+      const req = (mode) => C.encodeTlv([[Tag.PATH, C.str(from)], [Tag.NEW_PATH, C.str(to)], [Tag.COPY_MODE, C.u8(mode)]]);
+      let mode = 1;
+      try {
+        for (;;) {
+          if (o.signal && o.signal.aborted) throw new NdpTransportError("aborted");
+          const t = C.parseTlv((await this.request(Command.FS_COPY, req(mode), SLOW_MS)).payload);
+          mode = 0;
+          const copied = Number(t.u64(Tag.COPIED) || 0), total = Number(t.u64(Tag.TOTAL_SIZE) || 0);
+          if (o.onProgress) o.onProgress(copied, total);
+          if (t.u8(Tag.MORE) !== 1) return { bytes: copied };
+        }
+      } catch (e) {
+        if (mode === 0 && !this.isClosed) await this.request(Command.FS_COPY, req(2), SLOW_MS).catch(() => undefined);
+        throw e;
+      }
+    }
+
     /** Permanently deletes an item inside a trash folder, or empties the trash (the folder itself). Repeats the console's
      * small batches until done; `onProgress(removed)` may return false to stop early. */
     async purge(path, onProgress) {
@@ -265,7 +286,7 @@
       for (;;) {
         const t = C.parseTlv((await this.request(Command.FS_PURGE, C.encodeTlv([[Tag.PATH, C.str(path)]]), SLOW_MS)).payload);
         removed += t.u32(Tag.PURGED) || 0;
-        if (t.u8(Tag.PURGE_MORE) !== 1) return { removed, complete: true };
+        if (t.u8(Tag.MORE) !== 1) return { removed, complete: true };
         if (onProgress && onProgress(removed) === false) return { removed, complete: false };
       }
     }

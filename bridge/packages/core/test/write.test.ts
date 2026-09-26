@@ -368,6 +368,33 @@ suite("writes over TCP (DEVELOPMENT mode)", () => {
     assert.equal(existsSync(join(agentDir, "clip2.txt")), true);
   });
 
+  test("copy: the console copies a file on the card in steps; never overwrites; abort discards the partial copy; CLI cp", async () => {
+    const c = await connect();
+    await c.hello();
+    const data = randomBytes(2_500_000);
+    writeFileSync(join(agentDir, "cpsrc.bin"), data);
+    const seen: number[] = [];
+    const r = await c.copy(`${DIR}/cpsrc.bin`, `${DIR}/cpdst.bin`, { onProgress: (n) => void seen.push(n) });
+    assert.equal(r.bytes, data.length);
+    assert.ok(seen.length >= 3 && seen.every((n, i) => i === 0 || n > seen[i - 1]!), `several growing steps (${seen.join(",")})`);
+    assert.deepEqual(readFileSync(join(agentDir, "cpdst.bin")), data);
+    assert.deepEqual(leftovers(agentDir), []);
+    assert.equal(await code(c.copy(`${DIR}/cpsrc.bin`, `${DIR}/cpdst.bin`)), "EXISTS");
+    assert.equal(await code(c.copy(`${DIR}/cpsrc.bin`, "/luma/x.bin")), "PROTECTED_PATH");
+    assert.equal(await code(c.copy(`${DIR}/nope`, `${DIR}/nope2`)), "NOT_FOUND");
+    // aborting after the first step discards the partial copy
+    const ctl = new AbortController();
+    await assert.rejects(c.copy(`${DIR}/cpsrc.bin`, `${DIR}/cpabort.bin`, { signal: ctl.signal, onProgress: () => ctl.abort() }));
+    assert.equal(existsSync(join(agentDir, "cpabort.bin")), false);
+    assert.equal(existsSync(join(agentDir, "cpabort.bin.ndp-tmp")), false);
+    assert.equal((await c.stat(`${DIR}/cpsrc.bin`)).size, data.length, "the source is untouched and the connection still works");
+    c.close();
+    const target = `127.0.0.1:${port}`;
+    const out = await run(process.execPath, [CLI, "cp", target, `${DIR}/cpsrc.bin`, `${DIR}/clicp.bin`], { encoding: "buffer" });
+    assert.match(out.stdout.toString(), /2500000 bytes/);
+    assert.deepEqual(readFileSync(join(agentDir, "clicp.bin")), data);
+  });
+
   test("CLI: put --text, put file, refuse overwrite, --replace, mkdir", async () => {
     const target = `127.0.0.1:${port}`;
     const cli = (...args: string[]) => run(process.execPath, [CLI, ...args], { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 });

@@ -7,7 +7,7 @@
   const { h, fill, icon, copyText } = NDP.ui;
   const t = (...a) => NDP.i18n.t(...a);
 
-  const SECTIONS = ["what", "pairing", "keys", "modes", "upload", "edit", "trash", "mcp", "security", "trouble", "about"];
+  const SECTIONS = ["what", "pairing", "keys", "modes", "upload", "edit", "organize", "trash", "mcp", "security", "trouble", "about"];
   const REPO = "https://github.com/BC-Estrategias/nintendo-dev-mcp";
 
   function prose(text) {

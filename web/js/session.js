@@ -95,7 +95,9 @@
           try {
             await c.authenticate(C.fromHex(k.psk));
           } catch (e) {
-            if (e.statusName === "UNAUTHORIZED") { store.forget(S.deviceHex); setState("pairing", "rejected"); return; }
+            // The key is NOT deleted: a refusal can be transient (the console just restarted, or the pairings were cleared and
+            // this browser will be paired again, which replaces the key). Deleting it here made a valid key vanish.
+            if (e.statusName === "UNAUTHORIZED") { console.warn("the console refused the stored key", e); setState("pairing", "rejected"); return; }
             throw e;
           }
         }
@@ -147,6 +149,7 @@
     }
   }
 
+  S.hasStoredKey = () => !!(S.deviceHex && store.read()[S.deviceHex]);
   Object.assign(S, { connect, pair, forgetThisBrowser, run, refreshContext: loadContext });
   NDP.session = S;
 })();

@@ -656,9 +656,34 @@ export class NdpClient {
       const res = await this.request(Command.FS_PURGE, encodeTlv([[Tag.PATH, str(normalizePath(path))]]), SLOW_FS_TIMEOUT_MS);
       const t = parseTlv(res.payload);
       removed += t.u32(Tag.PURGED) ?? 0;
-      const more = t.u8(Tag.PURGE_MORE) === 1;
+      const more = t.u8(Tag.MORE) === 1;
       if (!more) return { removed, complete: true };
       if (onProgress?.(removed) === false) return { removed, complete: false };
+    }
+  }
+
+  /**
+   * Copies ONE file on the card (agent >= 1.3.0) without it passing through this computer: the console copies in bounded steps
+   * into `<to>.ndp-tmp` and renames it into place at the end, so a failure never leaves a half-written destination. Never
+   * overwrites (EXISTS). `signal` aborts between steps and discards the partial copy. Folders are the caller's job (mkdir + copy
+   * each file).
+   */
+  async copy(from: string, to: string, opts: { onProgress?: (copied: number, total: number) => void; signal?: AbortSignal } = {}): Promise<{ bytes: number }> {
+    const fields = (mode: number): TlvField[] => [[Tag.PATH, str(normalizePath(from))], [Tag.NEW_PATH, str(normalizePath(to))], [Tag.COPY_MODE, u8(mode)]];
+    let mode = 1;
+    try {
+      for (;;) {
+        if (opts.signal?.aborted) throw new NdpTransportError("aborted");
+        const res = await this.request(Command.FS_COPY, encodeTlv(fields(mode)), SLOW_FS_TIMEOUT_MS);
+        mode = 0;
+        const t = parseTlv(res.payload);
+        const copied = Number(t.u64(Tag.COPIED) ?? 0n), total = Number(t.u64(Tag.TOTAL_SIZE) ?? 0n);
+        opts.onProgress?.(copied, total);
+        if (t.u8(Tag.MORE) !== 1) return { bytes: copied };
+      }
+    } catch (e) {
+      if (mode === 0 && !this.isClosed) await this.request(Command.FS_COPY, encodeTlv(fields(2)), SLOW_FS_TIMEOUT_MS).catch(() => undefined); // drop the partial copy
+      throw e;
     }
   }
 

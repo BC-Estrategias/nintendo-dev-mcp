@@ -9,7 +9,8 @@
 
   // ---------------------------------------------------------------------------------------------- preferences
   const PREFS_KEY = "ndev.prefs";
-  const DEFAULTS = { showHidden: false, confirmDelete: true, backupOnSave: true, theme: "auto" };
+  const coarse = (() => { try { return matchMedia("(pointer: coarse)").matches || innerWidth < 720; } catch (_) { return false; } })();
+  const DEFAULTS = { showHidden: false, confirmDelete: true, backupOnSave: true, theme: "auto", openOnClick: coarse };
   const prefs = Object.assign({}, DEFAULTS);
   try { const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}"); for (const k of Object.keys(DEFAULTS)) if (typeof saved[k] === typeof DEFAULTS[k]) prefs[k] = saved[k]; } catch (_) { /* defaults */ }
   Object.defineProperty(prefs, "set", {
@@ -55,6 +56,11 @@
     const err = h("div.field-error", { role: "alert" });
     const btn = h("button.primary", { type: "submit", text: t("pair") });
     const rejected = S.error === "rejected";
+    code.addEventListener("input", () => { // format as XXXX-XXXX-XXXX-XXXX (paste friendly) and go as soon as it is complete
+      const raw = code.value.replace(/[^0-9a-z]/gi, "").toUpperCase().slice(0, 16);
+      code.value = raw.replace(/(.{4})(?=.)/g, "$1-");
+      if (raw.length === 16 && label.value.trim()) setTimeout(() => form.requestSubmit(), 0);
+    });
     const form = h("form.pair-card", { onsubmit: async (e) => {
       e.preventDefault();
       err.textContent = "";
@@ -69,7 +75,7 @@
       }
     } },
       h("h2", { text: t("pairTitle") }),
-      rejected ? h("div.banner.warn", null, icon("warn"), h("p", { text: t("pairRejected") })) : null,
+      rejected ? h("div.banner.warn", null, icon("warn"), h("div", null, h("p", { text: t("pairRejected") }), S.hasStoredKey() ? h("button", { type: "button", onclick: () => S.connect(), text: t("retryStoredKey") }) : null)) : null,
       h("ol.steps", null, h("li", { text: t("pairStep1") }), h("li", { text: t("pairStep2") }), h("li", { text: t("pairStep3") })),
       h("label.field", null, h("span", { text: t("pairCode") }), code),
       h("label.field", null, h("span", { text: t("pairLabel") }), label, h("span.muted.small", { text: t("pairLabelHint") })),

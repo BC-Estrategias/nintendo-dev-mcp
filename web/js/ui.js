@@ -54,6 +54,9 @@
     copy: "M8 8h11v12H8zM5 16V4h11",
     restore: "M4 12a8 8 0 1 1 2.3 5.6M4 20v-5h5",
     console: "M4 5h16v14H4zM4 12h16M8 8.5h.1M8 15.5h.1",
+    cut: "M6 4a2.5 2.5 0 1 0 .1 0M6 15.5a2.5 2.5 0 1 0 .1 0M8 6.2L20 19M8 17.5L20 5",
+    paste: "M9 4h6v3H9zM7 5.5H5V21h14V5.5h-2M8.5 12h7M8.5 16h7",
+    move: "M4 12h14M13 6l6 6-6 6",
   };
   function icon(name, cls) {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");

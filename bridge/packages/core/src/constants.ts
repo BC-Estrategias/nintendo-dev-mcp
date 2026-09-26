@@ -27,6 +27,7 @@ export const Command = {
   FS_RENAME: 0x0032,
   FS_DELETE: 0x0033,
   FS_PURGE: 0x0034,
+  FS_COPY: 0x0035,
 } as const;
 
 export const FsType = { FILE: 1, DIR: 2 } as const;
@@ -116,7 +117,9 @@ export const Tag = {
   SD_FREE: 0x0057,
   NEW_PATH: 0x0058,
   PURGED: 0x0059,
-  PURGE_MORE: 0x005a,
+  MORE: 0x005a,
+  COPIED: 0x005b,
+  COPY_MODE: 0x005c,
 } as const;
 
 export type Mode = "READ_ONLY" | "DEVELOPMENT" | "FULL";

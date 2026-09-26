@@ -167,6 +167,7 @@ suite("web/js client against the C agent over a WebSocket", () => {
       assert.deepEqual(await c.purge(d2.trashPath, (n: number) => void steps.push(n)), { removed: 1, complete: true });
       assert.equal(existsSync(join(agentDir, ".ndp-trash", "restored.bin")), false);
       assert.equal(await code(c.purge(`${DIR}/sub`)), "PROTECTED_PATH");
+
       assert.equal(existsSync(join(agentDir, "sub")), true);
       assert.equal(await code(c.write("/luma/x.bin", big)), "PROTECTED_PATH");
       assert.equal((await c.accessInfo()).mode, "DEVELOPMENT");
@@ -192,6 +193,16 @@ suite("web/js client against the C agent over a WebSocket", () => {
       const r = await c.read(`${DIR}/blob.bin`, {}, (chunk: Uint8Array) => { got += chunk.length; });
       assert.equal(got, data.length);
       assert.equal(r.verified, true);
+      // copy on the console: several steps, byte-exact, never over an existing file, abort discards the partial copy
+      const steps: number[] = [];
+      const cp = await c.copy(`${DIR}/blob.bin`, `${DIR}/blob-copy.bin`, { onProgress: (n: number) => void steps.push(n) });
+      assert.equal(cp.bytes, data.length);
+      assert.ok(steps.length >= 3);
+      assert.deepEqual(readFileSync(join(agentDir, "blob-copy.bin")), data);
+      assert.equal(await code(c.copy(`${DIR}/blob.bin`, `${DIR}/blob-copy.bin`)), "EXISTS");
+      const ctl = new AbortController();
+      await assert.rejects(c.copy(`${DIR}/blob.bin`, `${DIR}/blob-abort.bin`, { signal: ctl.signal, onProgress: () => ctl.abort() }));
+      assert.equal(existsSync(join(agentDir, "blob-abort.bin.ndp-tmp")) || existsSync(join(agentDir, "blob-abort.bin")), false);
       const part = await c.readBytes(`${DIR}/blob.bin`, { offset: 1000, length: 5000 });
       assert.deepEqual(Buffer.from(part.data), data.subarray(1000, 6000));
     } finally {

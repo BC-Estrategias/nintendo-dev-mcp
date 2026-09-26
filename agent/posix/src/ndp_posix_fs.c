@@ -197,6 +197,16 @@ static int p_remove(void *ctx, const char *path) {
   return unlink(full) == 0 ? NDP_OK : map_errno(errno);
 }
 
+static int p_file_append(void *ctx, const char *path, void **out) {
+  char full[FULL_MAX];
+  FILE *fp;
+  if (full_path((const ndp_posix_fs_ctx *)ctx, path, full, sizeof full) != 0) return NDP_ST_NOT_FOUND;
+  fp = fopen(full, "ab");
+  if (!fp) return map_errno(errno);
+  *out = fp;
+  return NDP_OK;
+}
+
 static int p_rmdir(void *ctx, const char *path) {
   char full[FULL_MAX];
   if (full_path((const ndp_posix_fs_ctx *)ctx, path, full, sizeof full) != 0) return NDP_ST_NOT_FOUND;
@@ -224,5 +234,6 @@ int ndp_posix_fs_init(ndp_fs_ops *ops, ndp_posix_fs_ctx *ctx, const char *root) 
   ops->rename = p_rename;
   ops->remove_file = p_remove;
   ops->remove_dir = p_rmdir;
+  ops->file_append = p_file_append;
   return 0;
 }

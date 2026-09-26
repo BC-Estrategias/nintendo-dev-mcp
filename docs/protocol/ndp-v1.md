@@ -86,6 +86,7 @@ mac = HMAC-SHA256(session_key, u64le(counter) ‖ header[0:20] ‖ payload)[0:16
 | 0x0031 | FS_MKDIR | M5 ✔ | cria um diretório |
 | 0x0032 | FS_RENAME | ✔ (1.2.0) | move/renomeia um arquivo ou pasta (nunca sobrescreve) |
 | 0x0033 | FS_DELETE | M5 ✔ | **move** para a lixeira (nunca apaga de verdade) |
+| 0x0035 | FS_COPY | ✔ (1.3.0) | copia UM arquivo dentro do cartão, em passos, feita pelo console |
 | 0x0034 | FS_PURGE | ✔ (1.2.2) | apaga **de verdade**, só o que está dentro de uma lixeira (ou esvazia a lixeira) |
 | 0x0040+ | LOG_* / CRASH_* | fase 3 | |
 | 0x8000–0xFFFF | reservado a extensões de plataforma | | |
@@ -169,7 +170,8 @@ ERR carrega, opcionalmente: `0x0001 detail` (str, texto humano curto, **informat
 | 0x0054 / 0x0055 | sys_mem_total / sys_mem_free | u64 | DEVICE_INFO RES: região SYSTEM |
 | 0x0056 / 0x0057 | sd_total / sd_free | u64 | DEVICE_INFO RES: cartão SD, bytes |
 | 0x0058 | new_path | str | FS_RENAME REQ (destino) e RES (destino normalizado) |
-| 0x0059 / 0x005A | purged / purge_more | u32 / u8 | FS_PURGE RES: itens (arquivos e pastas) removidos por este pedido / 1 se ainda resta trabalho |
+| 0x0059 / 0x005A | purged / more | u32 / u8 | FS_PURGE RES: itens (arquivos e pastas) removidos por este pedido; `more` (também FS_COPY RES) = 1 se ainda resta trabalho |
+| 0x005B / 0x005C | copied / copy_mode | u64 / u8 | FS_COPY RES: bytes já copiados / REQ: 1 = começar (descarta um temporário antigo), 0 = continuar (padrão), 2 = descartar a cópia parcial |
 
 ## 8. Ordem de validação de um frame recebido pelo agent
 Depois que o decoder entrega um frame, o agent avalia **nesta ordem** e responde ao primeiro problema:
@@ -303,11 +305,16 @@ Agent  → RES {written, sha256, replaced}       (ou ERR)
 - Uma falha do SO deixa a origem no lugar (`IO_ERROR`).
 
 ### FS_PURGE (0x0034, agente ≥ 1.2.2)
-`REQ {path}` → `RES {purged, purge_more}`. **Apaga de verdade**, mas **somente dentro de uma lixeira** (`<write root>/.ndp-trash`). `path` é um item dentro da lixeira (arquivo, ou pasta com tudo o que ela contém) ou a própria pasta da lixeira, que é **esvaziada** (a pasta continua existindo).
+`REQ {path}` → `RES {purged, more}`. **Apaga de verdade**, mas **somente dentro de uma lixeira** (`<write root>/.ndp-trash`). `path` é um item dentro da lixeira (arquivo, ou pasta com tudo o que ela contém) ou a própria pasta da lixeira, que é **esvaziada** (a pasta continua existindo).
 - Passa pela política de **escrita** (§11): `FORBIDDEN_MODE` em `READ_ONLY`; `PROTECTED_PATH` para qualquer coisa fora de uma lixeira (inclusive uma `write_root`, uma zona `never_write` ou uma pasta parecida como `.ndp-trashy`), `PATH_INVALID`, `BAD_REQUEST` sem `path`. `NOT_FOUND` se o item não existe.
-- O trabalho por pedido é **limitado** (16 remoções). `purge_more = 1` significa que ainda resta trabalho: o cliente DEVE repetir o mesmo `REQ` até receber `0`. Nada é lembrado entre pedidos (cada um recomeça do que está no disco), então uma queda de conexão no meio é segura. `purged` conta arquivos e pastas removidos neste pedido.
+- O trabalho por pedido é **limitado** (16 remoções). `more = 1` significa que ainda resta trabalho: o cliente DEVE repetir o mesmo `REQ` até receber `0`. Nada é lembrado entre pedidos (cada um recomeça do que está no disco), então uma queda de conexão no meio é segura. `purged` conta arquivos e pastas removidos neste pedido.
 - Links simbólicos não existem para o protocolo: uma pasta que contém um não pode ser esvaziada (`IO_ERROR`) e o alvo do link nunca é tocado. Falha do SO → `IO_ERROR`, o que restou continua lá. Plataforma sem `remove_dir` → `UNSUPPORTED_COMMAND` para pastas.
 - O servidor MCP **não** expõe esta operação (um assistente nunca apaga em definitivo); a CLI (`ndev purge`) e a página web sim.
+
+### FS_COPY (0x0035, agente ≥ 1.3.0)
+`REQ {path, new_path, copy_mode?}` → `RES {copied, total_size, more}`. Copia **um arquivo** dentro do cartão, **feita pelo console** (os dados não passam pelo cliente), em passos limitados (1 MiB por pedido). O destino só aparece no último passo: o console escreve em `<new_path>.ndp-tmp` e o **renomeia** no fim, então uma falha nunca deixa um destino pela metade. O cliente repete o pedido (com `copy_mode` 0) enquanto `more = 1`; a posição do passo é o tamanho do temporário (nada é guardado entre pedidos). O primeiro pedido DEVE levar `copy_mode = 1` (descarta um temporário de outra cópia, para nunca misturar arquivos); `copy_mode = 2` descarta a cópia parcial (cancelar/erro).
+- Política: a origem passa pela política de **leitura**, o destino pela de **escrita** (§11): `FORBIDDEN_MODE`, `PROTECTED_PATH` (inclusive destino dentro de uma lixeira; **sair** da lixeira copiando é permitido), `PATH_INVALID`. `NOT_FOUND` (origem, ou pasta de destino), `EXISTS` (destino existe, ou origem = destino; nunca sobrescreve), `BAD_REQUEST` (origem é pasta: o cliente copia pastas arquivo a arquivo, com `FS_MKDIR`; sufixos reservados `.ndp-tmp`/`.ndp-old`/`.bak` no destino; `copy_mode` inválido), `NO_SPACE`/`IO_ERROR` (a cópia parcial fica até `copy_mode = 2` ou um novo início), `UNSUPPORTED_COMMAND` se a plataforma não sabe anexar a arquivos.
+- Um temporário maior que a origem é descartado (`IO_ERROR`). Não há verificação de hash: só o tamanho final é conferido (cópia dentro do mesmo cartão).
 
 ## 15. Página web e transporte WebSocket (opcional, agente ≥ 1.2.0)
 O agente PODE servir uma página (um único HTML, gzip) e um endpoint WebSocket numa **segunda porta TCP** (o app do 3DS usa **8080**). Nada muda no NDP: cada mensagem WebSocket **binária** carrega bytes do mesmo fluxo de frames das §2–§14 (um frame pode atravessar várias mensagens ou várias frames caberem numa só; a fronteira da mensagem não tem significado). Pareamento, AUTH, MAC por frame, política de acesso e modo valem **exatamente** como na porta NDP.

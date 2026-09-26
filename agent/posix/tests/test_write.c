@@ -634,7 +634,7 @@ static int purge_all(const char *path, long *removed, resp_t *last) {
     *last = r;
     if (!is_res(r)) return calls;
     *removed += tlv_u32(r, NDP_TAG_PURGED);
-    if (tlv_u8(r, NDP_TAG_PURGE_MORE) == 0) return calls;
+    if (tlv_u8(r, NDP_TAG_MORE) == 0) return calls;
     if (calls > 100) return calls;
   }
 }
@@ -653,7 +653,7 @@ static void test_purge(void) {
   /* one file in the trash */
   put(DIR "/.ndp-trash/pg1.txt", "PG1", 3);
   r = purge(DIR "/.ndp-trash/pg1.txt");
-  CHECK(is_res(r) && tlv_u32(r, NDP_TAG_PURGED) == 1 && tlv_u8(r, NDP_TAG_PURGE_MORE) == 0, "a file is deleted for good");
+  CHECK(is_res(r) && tlv_u32(r, NDP_TAG_PURGED) == 1 && tlv_u8(r, NDP_TAG_MORE) == 0, "a file is deleted for good");
   CHECK(!exists(DIR "/.ndp-trash/pg1.txt") && exists(DIR "/.ndp-trash"), "gone, the trash folder stays");
   CHECK(is_err(purge(DIR "/.ndp-trash/pg1.txt"), NDP_ST_NOT_FOUND), "already gone");
 
@@ -719,6 +719,114 @@ static void test_purge(void) {
   g_ops = g_real_ops; g_agent.cfg.fs = &g_ops;
 }
 
+/* ---- FS_COPY: one file, in bounded steps, atomic at the end ---- */
+static resp_t cpy(const char *from, const char *to, int mode) {
+  treq t; treq_init(&t);
+  ndp_tlv_put_str(&t.w, NDP_TAG_PATH, from);
+  ndp_tlv_put_str(&t.w, NDP_TAG_NEW_PATH, to);
+  if (mode >= 0) { uint8_t m = (uint8_t)mode; ndp_tlv_put(&t.w, NDP_TAG_COPY_MODE, &m, 1); }
+  return frame(&g_agent, NDP_KIND_REQ, ++g_id, NDP_CMD_FS_COPY, t.b, t.w.len);
+}
+static int cpy_all(const char *from, const char *to, resp_t *last) {
+  int steps = 0, mode = 1;
+  for (;;) {
+    resp_t r = cpy(from, to, mode);
+    steps++; mode = 0; *last = r;
+    if (!is_res(r) || tlv_u8(r, NDP_TAG_MORE) == 0 || steps > 200) return steps;
+  }
+}
+static int same_file(const char *a, const char *b) {
+  char pa[256], pb[256], cmd[600];
+  full(pa, sizeof pa, a); full(pb, sizeof pb, b);
+  snprintf(cmd, sizeof cmd, "cmp -s '%s' '%s'", pa, pb);
+  return system(cmd) == 0;
+}
+
+static void test_copy(void) {
+  resp_t r;
+  int steps, i;
+  uint8_t *big;
+  const size_t BIG = 3 * 1024 * 1024 + 123;
+
+  ndp_agent_close(&g_agent);
+  g_ops = g_real_ops;
+  new_agent(NDP_MODE_DEVELOPMENT);
+
+  /* a small file: one step, exact content, source untouched, no temporary left */
+  put(DIR "/cp1.txt", "COPY ME", 7);
+  steps = cpy_all(DIR "/cp1.txt", DIR "/cp1-copy.txt", &r);
+  CHECK(steps == 1 && is_res(r) && tlv_u64(r, NDP_TAG_COPIED) == 7 && tlv_u64(r, NDP_TAG_TOTAL_SIZE) == 7 && tlv_u8(r, NDP_TAG_MORE) == 0, "one-step copy");
+  CHECK(content_is(DIR "/cp1-copy.txt", "COPY ME", 7) && content_is(DIR "/cp1.txt", "COPY ME", 7) && !exists(DIR "/cp1-copy.txt.ndp-tmp"), "content exact, source intact, no temp");
+
+  /* a multi-step copy (budget is 1 MiB per request) */
+  big = malloc(BIG);
+  for (i = 0; i < (int)BIG; i++) big[i] = (uint8_t)((i * 131 + (i >> 8)) & 255);
+  put(DIR "/cpbig.bin", big, BIG);
+  steps = cpy_all(DIR "/cpbig.bin", DIR "/cpbig-copy.bin", &r);
+  CHECK(steps == 4 && is_res(r) && tlv_u64(r, NDP_TAG_COPIED) == BIG, "a 3 MiB file takes %d bounded steps", steps);
+  CHECK(same_file(DIR "/cpbig.bin", DIR "/cpbig-copy.bin") && !exists(DIR "/cpbig-copy.bin.ndp-tmp"), "byte-identical");
+  /* the destination does not exist until the last step */
+  r = cpy(DIR "/cpbig.bin", DIR "/cpbig-mid.bin", 1);
+  CHECK(is_res(r) && tlv_u8(r, NDP_TAG_MORE) == 1 && tlv_u64(r, NDP_TAG_COPIED) == 1048576 && !exists(DIR "/cpbig-mid.bin") && file_size(DIR "/cpbig-mid.bin.ndp-tmp") == 1048576, "the first step leaves only a temporary");
+  /* continue from the temporary's size */
+  r = cpy(DIR "/cpbig.bin", DIR "/cpbig-mid.bin", 0);
+  CHECK(is_res(r) && tlv_u64(r, NDP_TAG_COPIED) == 2 * 1048576 && tlv_u8(r, NDP_TAG_MORE) == 1, "continues where it stopped");
+  /* discard */
+  r = cpy(DIR "/cpbig.bin", DIR "/cpbig-mid.bin", 2);
+  CHECK(is_res(r) && tlv_u8(r, NDP_TAG_MORE) == 0 && !exists(DIR "/cpbig-mid.bin.ndp-tmp") && !exists(DIR "/cpbig-mid.bin"), "discard removes the partial copy");
+  /* a stale temporary of another file is replaced by a fresh start (mode 1), never spliced */
+  put(DIR "/cpbig-stale.bin.ndp-tmp", "GARBAGE-FROM-ANOTHER-FILE", 25);
+  steps = cpy_all(DIR "/cpbig.bin", DIR "/cpbig-stale.bin", &r);
+  CHECK(is_res(r) && same_file(DIR "/cpbig.bin", DIR "/cpbig-stale.bin"), "start (mode 1) drops a leftover temporary");
+  /* a partial copy that is longer than the source is refused and cleaned */
+  put(DIR "/cp1-long.txt.ndp-tmp", "0123456789", 10);
+  CHECK(is_err(cpy(DIR "/cp1.txt", DIR "/cp1-long.txt", 0), NDP_ST_IO_ERROR) && !exists(DIR "/cp1-long.txt.ndp-tmp") && !exists(DIR "/cp1-long.txt"), "an impossible partial copy is dropped");
+  free(big);
+
+  /* empty file */
+  put(DIR "/cp-empty", "", 0);
+  steps = cpy_all(DIR "/cp-empty", DIR "/cp-empty2", &r);
+  CHECK(steps == 1 && is_res(r) && file_size(DIR "/cp-empty2") == 0 && !exists(DIR "/cp-empty2.ndp-tmp"), "empty file");
+
+  /* never overwrites; same file; folders; missing things */
+  CHECK(is_err(cpy(DIR "/cp1.txt", DIR "/cp1-copy.txt", 1), NDP_ST_EXISTS) && content_is(DIR "/cp1-copy.txt", "COPY ME", 7), "an existing destination is refused");
+  CHECK(is_err(cpy(DIR "/cp1.txt", DIR "/CP1.TXT", 1), NDP_ST_EXISTS), "same file (case-insensitive)");
+  mk(DIR "/cpdir");
+  CHECK(is_err(cpy(DIR "/cpdir", DIR "/cpdir2", 1), NDP_ST_BAD_REQUEST), "folders are copied file by file by the caller");
+  CHECK(is_err(cpy(DIR "/nope", DIR "/nope2", 1), NDP_ST_NOT_FOUND), "missing source");
+  CHECK(is_err(cpy(DIR "/cp1.txt", DIR "/nodir/x", 1), NDP_ST_NOT_FOUND), "missing destination folder");
+  CHECK(is_err(cpy(DIR "/cp1.txt", DIR "/x.bak", 1), NDP_ST_BAD_REQUEST) && is_err(cpy(DIR "/cp1.txt", DIR "/x.ndp-tmp", 1), NDP_ST_BAD_REQUEST), "reserved suffixes");
+  CHECK(is_err(cpy(DIR "/cp1.txt", DIR "/cpx", 3), NDP_ST_BAD_REQUEST), "bad copy_mode");
+  { treq t; treq_init(&t); ndp_tlv_put_str(&t.w, NDP_TAG_PATH, DIR "/cp1.txt"); CHECK(is_err(frame(&g_agent, NDP_KIND_REQ, ++g_id, NDP_CMD_FS_COPY, t.b, t.w.len), NDP_ST_BAD_REQUEST), "new_path required"); }
+
+  /* policy: destination must be writable, never into the trash, source must be readable; READ_ONLY forbids */
+  CHECK(is_err(cpy(DIR "/cp1.txt", "/other/newcopy.txt", 1), NDP_ST_PROTECTED_PATH) && !exists("/other/newcopy.txt"), "destination outside the write roots");
+  CHECK(is_err(cpy(DIR "/cp1.txt", "/luma/x.txt", 1), NDP_ST_PROTECTED_PATH), "protected zone");
+  CHECK(is_err(cpy(DIR "/cp1.txt", DIR "/.ndp-trash/x.txt", 1), NDP_ST_PROTECTED_PATH), "not into the trash");
+  put(DIR "/config/secret", "S", 1);
+  CHECK(is_err(cpy(DIR "/config/secret", DIR "/leak.txt", 1), NDP_ST_PROTECTED_PATH) && !exists(DIR "/leak.txt"), "an unreadable source stays unreadable");
+  put("/other/readable.txt", "R", 1);
+  CHECK(is_res(cpy("/other/readable.txt", DIR "/from-other.txt", 1)) && content_is(DIR "/from-other.txt", "R", 1), "a readable source outside the write roots can be copied INTO one");
+  mk(DIR "/.ndp-trash"); put(DIR "/.ndp-trash/intrash.txt", "T", 1);
+  CHECK(is_res(cpy(DIR "/.ndp-trash/intrash.txt", DIR "/restored-copy.txt", 1)), "a copy can come out of the trash");
+  new_agent(NDP_MODE_READ_ONLY);
+  CHECK(is_err(cpy(DIR "/cp1.txt", DIR "/ro-copy.txt", 1), NDP_ST_FORBIDDEN_MODE) && !exists(DIR "/ro-copy.txt"), "READ_ONLY forbids copy");
+  new_agent(NDP_MODE_DEVELOPMENT);
+
+  /* a full card: the error is reported and the partial copy can be discarded */
+  g_ops = g_real_ops; g_ops.file_write = w_write; g_agent.cfg.fs = &g_ops; g_write_fail = 1;
+  r = cpy(DIR "/cp1.txt", DIR "/full.txt", 1);
+  CHECK(is_err(r, NDP_ST_NO_SPACE) && !exists(DIR "/full.txt"), "NO_SPACE while copying");
+  g_write_fail = 0; g_ops = g_real_ops; g_agent.cfg.fs = &g_ops;
+  CHECK(is_res(cpy(DIR "/cp1.txt", DIR "/full.txt", 2)) && !exists(DIR "/full.txt.ndp-tmp"), "the partial copy is discarded");
+  CHECK(cpy_all(DIR "/cp1.txt", DIR "/full.txt", &r) == 1 && is_res(r), "and the copy works once there is room");
+
+  /* a platform without file_append cannot copy */
+  g_ops = g_real_ops; g_ops.file_append = NULL; g_agent.cfg.fs = &g_ops;
+  CHECK(is_err(cpy(DIR "/cp1.txt", DIR "/noappend.txt", 1), NDP_ST_UNSUPPORTED_COMMAND), "no file_append: unsupported");
+  g_ops = g_real_ops; g_agent.cfg.fs = &g_ops;
+}
+
 int main(void) {
   char tmpl[] = "/tmp/ndp-w-test-XXXXXX", tmpl2[] = "/tmp/ndp-w-other-XXXXXX", cmd[200];
   if (!mkdtemp(tmpl) || !mkdtemp(tmpl2)) { perror("mkdtemp"); return 2; }
@@ -741,6 +849,7 @@ int main(void) {
   test_delete();
   test_rename();
   test_purge();
+  test_copy();
 
   ndp_agent_close(&g_agent);
   snprintf(cmd, sizeof cmd, "rm -rf %s %s", g_root, g_other);
