@@ -4,7 +4,7 @@
 
 Torna um Nintendo 3DS com CFW um target remoto de desenvolvimento controlável por agentes de IA (Codex, Claude Code) via MCP. Arquitetura pensada para expandir a DSi e Switch.
 
-**Status (v1.0.0):** pronto para uso e distribuição. Agente 3DS (leitura, escrita atômica, lixeira, pareamento com HMAC por frame, pastas liberadas pelo dono no próprio console), CLI `ndev` e servidor MCP, validados num New 3DS com Luma3DS 13.3.3. O agente abre em **READ_ONLY**. Pesquisas que não seguiram (plugin 3GX dentro de jogo, agente no lugar do Notas de jogo) estão em `docs/research/` com o que se aprendeu.
+**Status (v1.2.0):** pronto para uso e distribuição. **Novo:** uma página web servida pelo próprio 3DS (`http://<ip-do-console>:8080`, o endereço aparece na tela de cima): navegar pelo cartão SD, **arrastar e soltar** para enviar, ver imagens, editar textos, baixar, renomear, lixeira/restaurar, configurações e um FAQ (inclui como instalar o MCP local). Substitui um cliente FTP; **R** no console liga/desliga. Mesmo pareamento, mesmos modos e mesmas pastas da CLI. Agente 3DS (leitura, escrita atômica, lixeira, pareamento com HMAC por frame, pastas liberadas pelo dono no próprio console), CLI `ndev` e servidor MCP, validados num New 3DS com Luma3DS 13.3.3. O agente abre em **READ_ONLY**. Pesquisas que não seguiram (plugin 3GX dentro de jogo, agente no lugar do Notas de jogo) estão em `docs/research/` com o que se aprendeu.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — arquitetura, segurança, roadmap
 - [`docs/protocol/ndp-v1.md`](docs/protocol/ndp-v1.md) — especificação do protocolo NDP v1
@@ -14,6 +14,7 @@ Torna um Nintendo 3DS com CFW um target remoto de desenvolvimento controlável p
 ```
 agent/common/   núcleo C99 sem dependências de SO (frames, TLV, paths, política, SHA/HMAC, HELLO/PING)
 agent/host/     agente de teste para macOS/Linux (mesmo núcleo atrás de sockets POSIX)
+web/            a página que o console serve (JS/CSS puro; `scripts/build-web.py` embute, comprimida)
 bridge/         TypeScript: @ndev/core (codec, cliente TCP, descoberta), @ndev/cli (`ndev`) e @ndev/mcp (servidor MCP)
 docs/protocol/  especificação + vetores de teste (gerados por uma implementação Python independente)
 tests/mcp-hello Compatibilidade MCP com Codex/Claude Code

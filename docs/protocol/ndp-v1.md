@@ -5,7 +5,7 @@ Especificação canônica. As implementações (C em `agent/common`, TypeScript 
 Palavras **DEVE / NÃO DEVE / PODE** têm o sentido do RFC 2119. Todos os inteiros são **little-endian**. Strings são UTF-8 sem NUL final.
 
 ## 1. Transporte
-TCP, uma conexão ativa por vez, uma operação por vez. Porta padrão **6464**. O protocolo é um fluxo de *frames*; não há dependência de HTTP/JSON.
+TCP, uma conexão ativa por vez, uma operação por vez. Porta padrão **6464**. O protocolo é um fluxo de *frames*; não há dependência de HTTP/JSON. Um segundo transporte opcional, para a página web servida pelo próprio console, leva **o mesmo fluxo de bytes** dentro de mensagens WebSocket (§15).
 
 ## 2. Frame
 
@@ -298,3 +298,25 @@ Agent  → RES {written, sha256, replaced}       (ou ERR)
 - `NOT_FOUND`: origem inexistente ou pasta de destino inexistente (nunca cria pastas). `EXISTS`: o destino já existe, ou origem = destino. `BAD_REQUEST`: `new_path` ausente ou pasta movida para dentro de si mesma.
 - Mudar só a **caixa** do nome (`a` → `A`; o cartão FAT não distingue caixa) é aceito: o agente renomeia em dois passos por um nome temporário `<origem>.ndp-ren` e desfaz se o segundo falhar.
 - Uma falha do SO deixa a origem no lugar (`IO_ERROR`).
+
+## 15. Página web e transporte WebSocket (opcional, agente ≥ 1.2.0)
+O agente PODE servir uma página (um único HTML, gzip) e um endpoint WebSocket numa **segunda porta TCP** (o app do 3DS usa **8080**). Nada muda no NDP: cada mensagem WebSocket **binária** carrega bytes do mesmo fluxo de frames das §2–§14 (um frame pode atravessar várias mensagens ou várias frames caberem numa só; a fronteira da mensagem não tem significado). Pareamento, AUTH, MAC por frame, política de acesso e modo valem **exatamente** como na porta NDP.
+
+### 15.1 Clientes
+- Porta NDP: **um** cliente NDP puro. Porta web: respostas HTTP curtas (no máximo 3 ao mesmo tempo) e **um** cliente WebSocket. Os dois clientes são **independentes** (cada um tem seu estado de agente e sua autenticação; chaves, modo e política são compartilhados): abrir a página não derruba o servidor MCP e vice-versa.
+- Uma nova conexão de um tipo **substitui** a anterior do mesmo tipo. Clientes ociosos são desconectados.
+
+### 15.2 HTTP
+Somente `GET` e `HEAD`, sem corpo, com o cabeçalho da requisição ≤ 2048 bytes. Erros: `400` (malformada, ou upgrade inválido), `405` (outro método), `413` (a requisição anuncia corpo), `431` (cabeçalho grande demais ou campo longo demais), `505` (não é HTTP/1.x), `404` (rota desconhecida).
+Rotas: `/` e `/index.html` — a página, **sempre** `Content-Encoding: gzip` (o agente não descomprime nem negocia), com `ETag` da versão embutida; `/ws` — o upgrade para WebSocket (`426` com `Upgrade: websocket` se a requisição não pede upgrade); `/favicon.ico` → `204`.
+Toda resposta leva `Cache-Control: no-cache`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Connection: close` e a CSP `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; connect-src ws:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`.
+
+### 15.3 Defesas contra o navegador
+A página roda em `http://`, então é o navegador do dono quem fala com o console; um site malicioso aberto no mesmo navegador NÃO pode usá-lo:
+- **`Host`** DEVE ser o endereço IP em que o console aceitou a conexão (a porta não é comparada); ausente ou diferente → `403` (defesa contra *DNS rebinding*). O agente de teste em `127.x` também aceita `localhost`.
+- **`Origin`**, quando presente, DEVE ser exatamente `http://` + o valor do `Host` da requisição; qualquer outro → `403`, e o console registra a tentativa (vale para o upgrade do WebSocket).
+- Upgrade: `GET /ws` com `Upgrade: websocket`, `Sec-WebSocket-Version: 13` (senão `400` com `Sec-WebSocket-Version: 13`) e `Sec-WebSocket-Key` válido; resposta `101` com `Sec-WebSocket-Accept` (SHA-1 + base64, RFC 6455 §4.2.2). Sem subprotocolos nem extensões. Bytes enviados pelo cliente antes do `101` fecham a conexão.
+- Frames WebSocket do cliente: **mascarados**, opcode binário (`0x2`) ou continuação (fragmentação permitida), `ping` respondido com `pong`, `close` respondido e encerrado, **máximo 70000 bytes** por frame. Violações fecham com o código WebSocket adequado: `1002` (bits reservados, sem máscara, opcode desconhecido, controle fragmentado ou > 125 bytes, continuação ou início de mensagem fora de ordem), `1003` (mensagem de texto: só binário é aceito), `1009` (frame grande demais).
+- A chave de pareamento fica no armazenamento do navegador (`localStorage`, ou `sessionStorage` se o dono não quiser ser lembrado); só provas HMAC trafegam. Como `http://` não é um contexto seguro (não há `crypto.subtle`), a página traz a sua própria SHA-256/HMAC, verificada contra os mesmos vetores de teste (`vectors.json`).
+
+Os vetores em `docs/protocol/test-vectors/` cobrem o handshake WebSocket, o parser HTTP e o decoder de frames WebSocket.

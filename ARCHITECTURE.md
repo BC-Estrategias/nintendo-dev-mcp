@@ -56,6 +56,9 @@ Faz só: rede, FS, info do aparelho, responder comandos, aplicar política local
 - **`agent/host`:** mesma `common` compilada no Mac com backends POSIX. Serve para: testes unitários do protocolo e política; agente falso para o Bridge; CI sem hardware. (Equivalente ao alvo Linux do ftpd.)
 - Tela superior: status/IP/porta/modo/versões; inferior: atividade recente. START = sair, X = alternar modo, Y = abrir/fechar a janela de pareamento, SELECT×2 = esquecer todos os pareamentos. UI simples primeiro.
 
+### 3.1.1 Página web (agente ≥ 1.2.0)
+O próprio agent serve, numa segunda porta (8080 no 3DS; **R** liga/desliga), um único HTML gzip embutido no binário (`web/` → `scripts/build-web.py` → `agent/web/ndp_web_assets_data.c`) e um endpoint WebSocket. A página fala **NDP sobre WebSocket** (spec §15) com a sua própria implementação de SHA-256/HMAC em JS (`http://` não tem `crypto.subtle`), verificada contra os mesmos vetores. O servidor tem dois slots de cliente independentes (NDP puro para a CLI/MCP; WebSocket para a página) e 3 slots HTTP curtos, então abrir a página não derruba o MCP. Sem dependência de build: JS/CSS puros, sem framework. Segurança: mesmo pareamento e mesma política da CLI (a página não muda modo, pastas nem pareamentos), `Host` = IP do console (anti-DNS-rebinding), `Origin` = a própria página, só `GET`/`HEAD`, CSP restrita.
+
 ### 3.2 Bridge (no computador)
 Monorepo TypeScript:
 

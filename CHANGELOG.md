@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0
+- **Web page served by the console.** The 3DS app now serves a file manager on port 8080 (address on the top screen; **R** turns it off/on): browse the SD card, view images, edit text files (atomic save, optional `.bak`), **drag and drop** files and folders to upload (SHA-256 checked by the console, conflict handling), download, rename/move, move to the trash and restore, plus Settings (device, SD and memory, opened folders, pairing, preferences) and an FAQ with the local MCP install steps. Portuguese and English. Same pairing, same modes and same folders as the CLI: the page cannot change any of them.
+- New command `FS_RENAME` (0x0032): move/rename without ever overwriting (also `ndev mv` and the MCP tool `nintendo_fs_move`).
+- NDP over WebSocket (spec §15) with Host/Origin checks against DNS rebinding and cross-site use; the raw NDP client and the page are independent, so the MCP server keeps working while the page is open.
+- The page ships its own SHA-256/HMAC (plain `http://` has no `crypto.subtle`), verified against the same test vectors as the C and TypeScript implementations.
+
 ## 1.1.1
 - The 3DS agent no longer reports `app_mem_*` (it always read 0 free of the agent's own 64 MB mode, which is misleading). Found on the first hardware run of `DEVICE_INFO`.
 

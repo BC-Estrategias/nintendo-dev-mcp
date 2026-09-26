@@ -6,6 +6,8 @@ The console and the computer are on the same LAN. The agent defends against **ot
 - nothing on the network can change the access mode, the opened folders or the pairings — those are changed with the console's buttons only;
 - protected system zones are never writable, and deletes only move items to a trash folder.
 
+The **web page** (v1.2.0+) uses the same pairing and the same rules: a browser must be paired with the code shown on the console, the page cannot change the mode, the opened folders or the pairings, and it can be switched off with **R** on the console. Because it is plain `http://` on the LAN, the console rejects requests whose `Host` is not its own address (DNS rebinding) and WebSocket upgrades whose `Origin` is not the page itself (so a malicious website cannot drive it through your browser); it accepts only `GET`/`HEAD` with no body, serves a strict Content-Security-Policy, and caps frame and header sizes. The pairing key is kept in the browser's storage: anyone using that browser profile can use it (untick "Remember" on shared computers, or use *Forget this browser*).
+
 Not protected against: someone who can read your computer's `~/.config/nintendo-dev/keys.json` (owner-only file, but any program running as you can read it, including an assistant with shell access); an eavesdropper on your LAN reading file contents (the channel is authenticated, **not encrypted**); physical access to the console or its SD card.
 
 ## Reporting a vulnerability
