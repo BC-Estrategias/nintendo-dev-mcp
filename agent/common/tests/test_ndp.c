@@ -8,6 +8,7 @@
 #include "ndp/ndp_auth.h"
 #include "ndp/ndp_frame.h"
 #include "ndp/ndp_names.h"
+#include "ndp/ndp_pair2.h"
 #include "ndp/ndp_path.h"
 #include "ndp/ndp_policy.h"
 #include "ndp/ndp_sha256.h"
@@ -513,6 +514,51 @@ static int hexval(char c) { return c >= '0' && c <= '9' ? c - '0' : c - 'a' + 10
 static uint32_t g_rnd = 0x1234567u;
 static uint32_t rnd_next(void) { g_rnd = g_rnd * 1664525u + 1013904223u; return g_rnd >> 8; }
 
+/* ---- X25519 (RFC 7748) and the pairing derivations, against the Python reference ---- */
+static void test_pair2(void) {
+  int i, j;
+  uint8_t out[32], base[32] = {9}, zero[32];
+  memset(zero, 0, sizeof zero);
+  for (i = 0; i < V_X25519_N; i++) {
+    CHECK(ndp_x25519(out, v_x25519s[i].scalar, v_x25519s[i].point) == 0 && memcmp(out, v_x25519s[i].out, 32) == 0, "x25519 vector %d", i);
+  }
+  /* the public key is scalar * 9 */
+  ndp_x25519_public(out, v_x25519s[3].scalar);
+  CHECK(memcmp(out, v_x25519s[3].out, 32) == 0, "public key from the base point");
+  for (i = 0; i < V_XLO_N; i++) {
+    for (j = 0; j < V_X25519_N; j++) {
+      CHECK(ndp_x25519(out, v_x25519s[j].scalar, v_xlos[i]) == -1 && memcmp(out, zero, 32) == 0, "low-order point %d is refused", i);
+    }
+  }
+  /* the input point's top bit is ignored (RFC 7748 §5) */
+  { uint8_t hi[32]; memcpy(hi, v_x25519s[0].point, 32); hi[31] |= 0x80; CHECK(ndp_x25519(out, v_x25519s[0].scalar, hi) == 0 && memcmp(out, v_x25519s[0].out, 32) == 0, "top bit of u ignored"); }
+  (void)base;
+  for (i = 0; i < V_PAIR2_N; i++) {
+    const v_pair2_t *p = &v_pair2s[i];
+    uint8_t pub_b[32], pub_c[32], sh_b[32], sh_c[32], commit[32], proof[32];
+    ndp_pair2_keys kb, kc;
+    size_t ll = strlen(p->label);
+    ndp_x25519_public(pub_b, p->secret_b);
+    ndp_x25519_public(pub_c, p->secret_c);
+    CHECK(memcmp(pub_b, p->pub_b, 32) == 0 && memcmp(pub_c, p->pub_c, 32) == 0, "pair2 %d public keys", i);
+    CHECK(ndp_x25519(sh_b, p->secret_b, pub_c) == 0 && ndp_x25519(sh_c, p->secret_c, pub_b) == 0 && memcmp(sh_b, sh_c, 32) == 0 && memcmp(sh_b, p->shared, 32) == 0, "pair2 %d shared secret", i);
+    ndp_pair2_commit(pub_b, p->nonce_b, commit);
+    CHECK(memcmp(commit, p->commit, 32) == 0, "pair2 %d commitment", i);
+    ndp_pair2_derive(sh_b, pub_b, pub_c, p->nonce_b, p->nonce_c, (const uint8_t *)p->label, ll, &kb);
+    ndp_pair2_derive(sh_c, pub_b, pub_c, p->nonce_b, p->nonce_c, (const uint8_t *)p->label, ll, &kc);
+    CHECK(kb.sas == p->sas && kc.sas == p->sas && kb.sas < 1000000u, "pair2 %d number %06u", i, (unsigned)kb.sas);
+    CHECK(memcmp(kb.psk, p->psk, 32) == 0 && memcmp(kc.psk, p->psk, 32) == 0 && memcmp(kb.key_id, p->key_id, 4) == 0, "pair2 %d key", i);
+    ndp_pair2_ok_proof(kb.psk, pub_b, pub_c, proof);
+    CHECK(memcmp(proof, p->ok_proof, 32) == 0, "pair2 %d proof", i);
+    /* anything that differs changes the number (the person would see a mismatch) */
+    { uint8_t n2[16]; ndp_pair2_keys k2; memcpy(n2, p->nonce_b, 16); n2[0] ^= 1;
+      ndp_pair2_derive(sh_b, pub_b, pub_c, n2, p->nonce_c, (const uint8_t *)p->label, ll, &k2);
+      CHECK(memcmp(k2.psk, p->psk, 32) != 0, "pair2 %d: a different nonce gives a different key", i); }
+    { ndp_pair2_keys k2; ndp_pair2_derive(sh_b, pub_b, pub_c, p->nonce_b, p->nonce_c, (const uint8_t *)"other", 5, &k2);
+      CHECK(memcmp(k2.psk, p->psk, 32) != 0, "pair2 %d: a different label gives a different key", i); }
+  }
+}
+
 static void test_web(void) {
   int i, chunk, j;
   static const int chunks[] = {1, 2, 3, 7, 64, 100000};
@@ -688,6 +734,7 @@ int main(void) {
   test_keystore();
   test_auth_dialogues();
   test_web();
+  test_pair2();
   printf("%d checks, %d failed\n", g_checks, g_fail);
   return g_fail ? 1 : 0;
 }

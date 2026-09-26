@@ -49,42 +49,77 @@
   }
 
   // ---------------------------------------------------------------------------------------------- pairing view
-  function pairingView() {
+  const pairUi = { phase: "idle", number: "", error: "", label: guessLabel(), remember: true, ctl: null };
+
+  function pairErrorText(e) {
+    if (e && e.refused === "denied") return t("pairDenied");
+    if (e && e.refused === "full") return t("pairFull");
+    if (e && e.statusName === "UNAUTHORIZED") return t("pairWindowClosed");
+    if (e && e.statusName === "BUSY") return t("pairBusy");
+    if (e && /timed out/.test(e.message || "")) return t("pairTimeout");
+    return (e && e.statusName && NDP.i18n.has("err." + e.statusName) ? t("err." + e.statusName) : (e && e.message) || String(e)) + " " + t("pairFailedHint");
+  }
+
+  async function startPairing() {
+    pairUi.phase = "waiting";
+    pairUi.number = "";
+    pairUi.error = "";
+    pairUi.ctl = new AbortController();
+    layout();
+    try {
+      await S.pairByNumber(pairUi.label.trim() || guessLabel(), pairUi.remember, (n) => { pairUi.number = n; layout(); }, pairUi.ctl.signal);
+      pairUi.phase = "idle";
+    } catch (e) {
+      const aborted = pairUi.ctl.signal.aborted;
+      pairUi.phase = "idle";
+      pairUi.error = aborted ? "" : pairErrorText(e);
+      if (S.client && (S.client.isClosed || aborted)) S.connect(); // a fresh connection: the console forgets the request of a closed one
+      layout();
+    }
+  }
+
+  function legacyCodeForm() {
     const code = h("input", { type: "text", inputMode: "text", autocomplete: "off", autocapitalize: "characters", spellcheck: false, placeholder: "XXXX-XXXX-XXXX-XXXX", maxLength: 24, "aria-label": t("pairCode") });
-    const label = h("input", { type: "text", value: guessLabel(), maxLength: 15, autocomplete: "off", spellcheck: false, "aria-label": t("pairLabel") });
-    const remember = h("input", { type: "checkbox", checked: true });
     const err = h("div.field-error", { role: "alert" });
-    const btn = h("button.primary", { type: "submit", text: t("pair") });
-    const rejected = S.error === "rejected";
+    const go = async () => {
+      err.textContent = "";
+      try { await S.pair(code.value, pairUi.label.trim() || guessLabel(), pairUi.remember); }
+      catch (ex) {
+        err.textContent = ex.statusName === "BAD_REQUEST" && ex.detail === "code" ? t("pairBadCode") : pairErrorText(ex);
+        if (S.client && S.client.isClosed) S.connect();
+      }
+    };
     code.addEventListener("input", () => { // format as XXXX-XXXX-XXXX-XXXX (paste friendly) and go as soon as it is complete
       const raw = code.value.replace(/[^0-9a-z]/gi, "").toUpperCase().slice(0, 16);
       code.value = raw.replace(/(.{4})(?=.)/g, "$1-");
-      if (raw.length === 16 && label.value.trim()) setTimeout(() => form.requestSubmit(), 0);
+      if (raw.length === 16) setTimeout(go, 0);
     });
-    const form = h("form.pair-card", { onsubmit: async (e) => {
-      e.preventDefault();
-      err.textContent = "";
-      btn.disabled = true;
-      try {
-        await S.pair(code.value, label.value.trim() || guessLabel(), remember.checked);
-      } catch (ex) {
-        const key = ex.statusName ? "err." + ex.statusName : null;
-        err.textContent = ex.statusName === "BAD_REQUEST" && ex.detail === "code" ? t("pairBadCode") : (key && NDP.i18n.has(key) ? t(key) : ex.message) + " " + t("pairFailedHint");
-        btn.disabled = false;
-        if (S.client && S.client.isClosed) S.connect(); // a failed attempt burns the connection: get a fresh one for the next try
-      }
-    } },
+    return h("details.legacy", null, h("summary", { text: t("pairUseCode") }), h("p.muted.small", { text: t("pairUseCodeHint") }), h("label.field", null, h("span", { text: t("pairCode") }), code), err);
+  }
+
+  function pairingView() {
+    const rejected = S.error === "rejected";
+    const waiting = pairUi.phase === "waiting";
+    const label = h("input", { type: "text", value: pairUi.label, maxLength: 15, autocomplete: "off", spellcheck: false, "aria-label": t("pairLabel"), oninput: (e) => { pairUi.label = e.target.value; } });
+    const remember = h("input", { type: "checkbox", checked: pairUi.remember, onchange: (e) => { pairUi.remember = e.target.checked; } });
+    const card = h("div.pair-card", null,
       h("h2", { text: t("pairTitle") }),
       rejected ? h("div.banner.warn", null, icon("warn"), h("div", null, h("p", { text: t("pairRejected") }), S.hasStoredKey() ? h("button", { type: "button", onclick: () => S.connect(), text: t("retryStoredKey") }) : null)) : null,
-      h("ol.steps", null, h("li", { text: t("pairStep1") }), h("li", { text: t("pairStep2") }), h("li", { text: t("pairStep3") })),
-      h("label.field", null, h("span", { text: t("pairCode") }), code),
-      h("label.field", null, h("span", { text: t("pairLabel") }), label, h("span.muted.small", { text: t("pairLabelHint") })),
-      h("label.check", null, remember, h("span", { text: t("pairRemember") })),
-      err, h("div.actions", null, btn),
+      S.info && !S.info.pairingOpen && !waiting ? h("div.banner.info", null, icon("help"), h("p", { text: t("pairWindowClosed") })) : null,
+      waiting ? h("div.pair-wait", null,
+        pairUi.number ? h("div.sas", { "aria-live": "polite", text: pairUi.number }) : h("div.spinner"),
+        h("p.pair-compare", { text: pairUi.number ? t("pairCompare") : t("pairWaiting") }),
+        h("div.actions", null, h("button", { type: "button", onclick: () => { pairUi.ctl.abort(); }, text: t("cancel") })))
+      : h("div", null,
+        h("ol.steps", null, h("li", { text: t("pairStep1") }), h("li", { text: t("pairStep2") }), h("li", { text: t("pairStep3") })),
+        pairUi.error ? h("div.field-error", { role: "alert", text: pairUi.error }) : null,
+        h("div.actions", null, h("button.primary", { type: "button", onclick: startPairing, text: t("pair") })),
+        h("details", null, h("summary", { text: t("pairOptions") }),
+          h("label.field", null, h("span", { text: t("pairLabel") }), label, h("span.muted.small", { text: t("pairLabelHint") })),
+          h("label.check", null, remember, h("span", { text: t("pairRemember") }))),
+        legacyCodeForm()),
       h("p.muted.small", { text: t("pairWhy") }));
-    if (S.info && !S.info.pairingOpen) form.insertBefore(h("div.banner.info", null, icon("help"), h("p", { text: t("pairWindowClosed") })), form.children[1]);
-    setTimeout(() => code.focus(), 0);
-    return form;
+    return card;
   }
 
   function stateView() {

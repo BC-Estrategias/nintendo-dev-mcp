@@ -28,6 +28,9 @@ export const Command = {
   FS_DELETE: 0x0033,
   FS_PURGE: 0x0034,
   FS_COPY: 0x0035,
+  PAIR_BEGIN: 0x0006,
+  PAIR_REVEAL: 0x0007,
+  PAIR_POLL: 0x0008,
 } as const;
 
 export const FsType = { FILE: 1, DIR: 2 } as const;
@@ -120,6 +123,10 @@ export const Tag = {
   MORE: 0x005a,
   COPIED: 0x005b,
   COPY_MODE: 0x005c,
+  PAIR_COMMIT: 0x0060,
+  PAIR_PUB: 0x0061,
+  PAIR_NONCE: 0x0062,
+  PAIR_STATE: 0x0063,
 } as const;
 
 export type Mode = "READ_ONLY" | "DEVELOPMENT" | "FULL";

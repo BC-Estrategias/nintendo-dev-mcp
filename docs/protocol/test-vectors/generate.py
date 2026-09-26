@@ -733,6 +733,105 @@ def build_auth_vectors():
     out["constants"] = {"device_id_hex": hx(AUTH_DEVICE_ID), "device_nonce_hex": hx(AUTH_NONCE), "bridge_nonce_hex": hx(BRIDGE_NONCE)}
     return out
 
+# ---------------------------------------------------------------- pareamento por comparação de número (spec §4.8)
+X25519_P = 2 ** 255 - 19
+
+
+def x25519_ref(k: bytes, u: bytes) -> bytes:
+    """RFC 7748 §5, escada de Montgomery em inteiros de Python (referência independente do C, do JS e do node:crypto)."""
+    kk = bytearray(k)
+    kk[0] &= 248
+    kk[31] &= 127
+    kk[31] |= 64
+    kn = int.from_bytes(kk, "little")
+    x1 = int.from_bytes(u, "little") & ((1 << 255) - 1)
+    x2, z2, x3, z3, swap = 1, 0, x1, 1, 0
+    p = X25519_P
+    for t in reversed(range(255)):
+        kt = (kn >> t) & 1
+        swap ^= kt
+        if swap:
+            x2, x3, z2, z3 = x3, x2, z3, z2
+        swap = kt
+        a = (x2 + z2) % p
+        aa = a * a % p
+        b = (x2 - z2) % p
+        bb = b * b % p
+        e = (aa - bb) % p
+        c = (x3 + z3) % p
+        d = (x3 - z3) % p
+        da = d * a % p
+        cb = c * b % p
+        x3 = (da + cb) ** 2 % p
+        z3 = x1 * (da - cb) ** 2 % p
+        x2 = aa * bb % p
+        z2 = e * (aa + 121665 * e) % p
+    if swap:
+        x2, x3, z2, z3 = x3, x2, z3, z2
+    return (x2 * pow(z2, p - 2, p) % p).to_bytes(32, "little")
+
+
+def pair2_commit(pub_b, nonce_b):
+    return hashlib.sha256(b"NDP-PAIR2-COMMIT" + pub_b + nonce_b).digest()
+
+
+def pair2_derive(shared, pub_b, pub_c, nonce_b, nonce_c, label: bytes):
+    th = hashlib.sha256(b"NDP-PAIR2-TH" + pub_b + pub_c + nonce_b + nonce_c + bytes([len(label)]) + label).digest()
+    k = hmac.new(shared, th, hashlib.sha256).digest()
+    sas = int.from_bytes(hmac.new(k, b"sas", hashlib.sha256).digest()[:4], "big") % 1000000
+    psk = hmac.new(k, b"psk", hashlib.sha256).digest()
+    return sas, psk
+
+
+def build_pair2_vectors():
+    out = {"x25519": [], "pair2": []}
+    # RFC 7748 §5.2 (scalar, u -> out) and §6.1 (Diffie-Hellman example): the reference must reproduce them exactly
+    rfc = [
+        ("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4", "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c",
+         "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"),
+        ("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d", "e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493",
+         "95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957"),
+    ]
+    base = bytes([9]) + bytes(31)
+    a_sk = bytes.fromhex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")
+    b_sk = bytes.fromhex("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb")
+    a_pk = bytes.fromhex("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a")
+    b_pk = bytes.fromhex("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f")
+    shared = bytes.fromhex("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742")
+    rfc += [(hx(a_sk), hx(base), hx(a_pk)), (hx(b_sk), hx(base), hx(b_pk)), (hx(a_sk), hx(b_pk), hx(shared)), (hx(b_sk), hx(a_pk), hx(shared))]
+    for k, u, o in rfc:
+        got = x25519_ref(bytes.fromhex(k), bytes.fromhex(u))
+        assert got.hex() == o, f"a referência de X25519 não reproduz o RFC 7748: {k[:8]}"
+        out["x25519"].append({"scalar_hex": k, "point_hex": u, "out_hex": o})
+    # points of small order (and the all-zero result) must be refused by every implementation
+    out["x25519_low_order"] = [hx(bytes(32)), hx(bytes([1]) + bytes(31)),
+                               "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800",
+                               "5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157"]
+    for lo in out["x25519_low_order"]:
+        for sk in (a_sk, b_sk, bytes(range(32))):
+            assert x25519_ref(sk, bytes.fromhex(lo)) == bytes(32), "um ponto de ordem pequena deve dar zero (o cliente recusa)"
+    cases = [
+        ("Chrome Mac", bytes(range(32)), bytes(range(32, 64)), bytes(range(16)), bytes(range(16, 32))),
+        ("phone", bytes([0x11] * 32), bytes([0xee] * 32), bytes([0xa5] * 16), bytes([0x5a] * 16)),
+        ("a", bytes.fromhex("ab" * 32), bytes.fromhex("cd" * 32), bytes(16), bytes([0xff] * 16)),
+        ("Firefox Linux!", bytes([7]) + bytes(31), bytes([9]) + bytes(31), bytes([1] * 16), bytes([2] * 16)),
+    ]
+    for label, sb, sc, nb, nc in cases:
+        pub_b = x25519_ref(sb, base)
+        pub_c = x25519_ref(sc, base)
+        sh_b = x25519_ref(sb, pub_c)
+        sh_c = x25519_ref(sc, pub_b)
+        assert sh_b == sh_c
+        sas, psk = pair2_derive(sh_b, pub_b, pub_c, nb, nc, label.encode())
+        okp = hmac.new(psk, b"NDP-PAIR2-OK" + pub_b + pub_c, hashlib.sha256).digest()
+        out["pair2"].append({
+            "label": label, "secret_b_hex": hx(sb), "secret_c_hex": hx(sc), "nonce_b_hex": hx(nb), "nonce_c_hex": hx(nc),
+            "pub_b_hex": hx(pub_b), "pub_c_hex": hx(pub_c), "commit_hex": hx(pair2_commit(pub_b, nb)), "shared_hex": hx(sh_b),
+            "sas": sas, "sas_text": "%06d" % sas, "psk_hex": hx(psk), "key_id_hex": hx(key_id_of(psk)), "ok_proof_hex": hx(okp),
+        })
+    return out
+
+
 # ---------------------------------------------------------------- geração
 def hx(b: bytes) -> str:
     return b.hex()
@@ -962,6 +1061,7 @@ def build():
     v["dialogues"] = dialogues
     v["auth"] = build_auth_vectors()
     v["web"] = build_ws_vectors()
+    v["pair2"] = build_pair2_vectors()
     return v
 
 
@@ -1114,6 +1214,7 @@ def emit_h(v) -> str:
     L.append("#define V_DIALOGUES_N %d\n\n" % len(v["dialogues"]))
     L.append(emit_auth(v["auth"]))
     L.append(emit_web(v["web"]))
+    L.append(emit_pair2(v["pair2"]))
     L.append("#endif\n")
     return "".join(L)
 
@@ -1147,6 +1248,29 @@ def emit_web(w) -> str:
         L.append(f"  {{{c_str(e['name'])}, v_ws_s_{i}, {len(e['stream_hex']) // 2}, v_ws_d_{i}, {len(e['data_hex']) // 2}, "
                  f"v_ws_p_{i}, {len(e['pings_hex']) // 2}, {kinds[e['result']]}, {e['code']}}},\n")
     L.append("};\n#define V_WS_N %d\n\n" % len(w["ws"]))
+    return "".join(L)
+
+
+def emit_pair2(p) -> str:
+    L = ["/* ---- pairing by number comparison ---- */\n"]
+    for i, e in enumerate(p["x25519"]):
+        for k in ("scalar_hex", "point_hex", "out_hex"):
+            L.append(c_bytes(f"v_x_{i}_{k[:-4]}", bytes.fromhex(e[k])))
+    L.append("typedef struct { const uint8_t *scalar; const uint8_t *point; const uint8_t *out; } v_x25519_t;\nstatic const v_x25519_t v_x25519s[] = {\n")
+    for i in range(len(p["x25519"])):
+        L.append(f"  {{v_x_{i}_scalar, v_x_{i}_point, v_x_{i}_out}},\n")
+    L.append("};\n#define V_X25519_N %d\n\n" % len(p["x25519"]))
+    for i, h_ in enumerate(p["x25519_low_order"]):
+        L.append(c_bytes(f"v_xlo_{i}", bytes.fromhex(h_)))
+    L.append("static const uint8_t *const v_xlos[] = {" + ", ".join(f"v_xlo_{i}" for i in range(len(p["x25519_low_order"]))) + "};\n#define V_XLO_N %d\n\n" % len(p["x25519_low_order"]))
+    keys = ("secret_b_hex", "secret_c_hex", "nonce_b_hex", "nonce_c_hex", "pub_b_hex", "pub_c_hex", "commit_hex", "shared_hex", "psk_hex", "key_id_hex", "ok_proof_hex")
+    for i, e in enumerate(p["pair2"]):
+        for k in keys:
+            L.append(c_bytes(f"v_p2_{i}_{k[:-4]}", bytes.fromhex(e[k])))
+    L.append("typedef struct { const char *label; const uint8_t *secret_b, *secret_c, *nonce_b, *nonce_c, *pub_b, *pub_c, *commit, *shared, *psk, *key_id, *ok_proof; uint32_t sas; } v_pair2_t;\nstatic const v_pair2_t v_pair2s[] = {\n")
+    for i, e in enumerate(p["pair2"]):
+        L.append(f"  {{{c_str(e['label'])}, " + ", ".join(f"v_p2_{i}_{k[:-4]}" for k in keys) + f", {e['sas']}u}},\n")
+    L.append("};\n#define V_PAIR2_N %d\n\n" % len(p["pair2"]))
     return "".join(L)
 
 

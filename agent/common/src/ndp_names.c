@@ -5,6 +5,9 @@ const char *ndp_command_name(uint16_t command) {
     case NDP_CMD_HELLO: return "HELLO";
     case NDP_CMD_PING: return "PING";
     case NDP_CMD_PAIR: return "PAIR";
+    case NDP_CMD_PAIR_BEGIN: return "PAIR_BEGIN";
+    case NDP_CMD_PAIR_REVEAL: return "PAIR_REVEAL";
+    case NDP_CMD_PAIR_POLL: return "PAIR_POLL";
     case NDP_CMD_AUTH: return "AUTH";
     case NDP_CMD_FS_LIST: return "FS_LIST";
     case NDP_CMD_FS_STAT: return "FS_STAT";

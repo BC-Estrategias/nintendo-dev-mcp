@@ -501,11 +501,17 @@ static void draw(uint64_t now) {
   if (g_keys_dirty_warn) printf(C_RED "Pairing not saved (SD error)" C_RESET "\n");
   if (AGENT_AUTH_REQUIRED) {
     uint32_t left = ndp_server_pairing_remaining_ms(&g_srv);
-    if (left > 0) {
+    if (ndp_server_pair2_pending(&g_srv)) {
+      /* a page or computer asked to pair: the number is shown here and there; the person compares and answers */
+      unsigned sas = (unsigned)g_srv.pairing.p2_sas;
+      printf("\n" C_YELLOW "PAIRING REQUEST" C_RESET " from %s\n\"%s\"\nNumber: " C_CYAN "%03u %03u" C_RESET "\n"
+             "Same number on the page / computer?\n" C_GREEN "A = YES, pair" C_RESET "   " C_RED "B = NO" C_RESET "\n",
+             g_srv.pairing.p2_peer, g_srv.pairing.p2_label, sas / 1000u, sas % 1000u);
+    } else if (left > 0) {
       char text[NDP_CODE_TEXT];
       ndp_code_encode(g_srv.pairing.code, text);
-      printf("\n" C_YELLOW "PAIRING OPEN" C_RESET " (%lu s)\nCode: " C_CYAN "%s" C_RESET "\n"
-             "Type it in 'ndev pair <ip>' on your computer.\n",
+      printf("\n" C_YELLOW "PAIRING OPEN" C_RESET " (%lu s)\nOn the page: click Pair. Or: ndev pair <ip>\n"
+             "Older way, the code: " C_CYAN "%s" C_RESET "\n",
              (unsigned long)((left + 999) / 1000), text);
     } else if (g_forget_armed_until > now) {
       printf("\n" C_RED "Press SELECT again to forget ALL paired computers" C_RESET "\n");
@@ -623,7 +629,12 @@ int main(void) {
     uint64_t now;
     bool changed;
     hidScanInput();
-    if (access_ui_active()) {
+    if (!access_ui_active() && ndp_server_pair2_pending(&g_srv) && (hidKeysDown() & (KEY_A | KEY_B))) {
+      int yes = (hidKeysDown() & KEY_A) != 0;
+      alog(yes ? "Pairing approved" : "Pairing refused");
+      (void)ndp_server_pair2_decide(&g_srv, yes);
+      draw_pending = true;
+    } else if (access_ui_active()) {
       /* the folder editor owns the buttons while it is open (START closes it, it does not quit the agent) */
       if (access_ui_handle(hidKeysDown())) draw_pending = true;
     } else if (hidKeysDown() & KEY_START) break;

@@ -91,6 +91,7 @@ typedef struct {
   ndp_server_platform plat;
   ndp_agent_config agent_cfg;
   uint32_t idle_timeout_ms;
+  uint32_t p2_prompt_ms; /* how long the number stays on the screen before the request expires (tests shorten it) */
 
   int listen_fd;
   int client_fd;        /* the raw NDP client (= nc[0].fd), -1 if none */
@@ -143,6 +144,13 @@ void ndp_server_set_keys(ndp_server *s, const ndp_keystore *keys);
  * from a secure random source and shows it to the user. */
 void ndp_server_open_pairing(ndp_server *s, const uint8_t code[NDP_CODE_BYTES], uint32_t duration_ms);
 void ndp_server_close_pairing(ndp_server *s);
+/* Pairing by number comparison (spec §4.8). While a request waits for the person, the platform shows
+ * pairing.p2_label, pairing.p2_peer and pairing.p2_sas, and calls _decide() when a button is pressed. The number is
+ * never written to the log. */
+#define NDP_P2_PROMPT_MS 60000u
+#define NDP_P2_COMMIT_MS 30000u
+int ndp_server_pair2_pending(const ndp_server *s);
+int ndp_server_pair2_decide(ndp_server *s, int approve);
 /* Milliseconds left in the window, 0 when it is closed. */
 uint32_t ndp_server_pairing_remaining_ms(ndp_server *s);
 /* Forgets every paired computer (persisted through keys_changed). The current client stays connected

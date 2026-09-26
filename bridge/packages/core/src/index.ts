@@ -7,3 +7,4 @@ export * from "./policy.ts";
 export * from "./client.ts";
 export * from "./discovery.ts";
 export * from "./auth.ts";
+export * from "./pair2.ts";

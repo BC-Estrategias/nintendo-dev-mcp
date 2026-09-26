@@ -45,5 +45,18 @@
     return hmacSha256(key, ctr, header.subarray(0, C.HEADER_SIZE), payload).subarray(0, C.MAC_SIZE);
   }
 
-  NDP.auth = { codeDecode, codeEncode, derivePsk, keyIdOf, proofOf, sessionKeyOf, frameMac };
+  // ---- pairing by number comparison (spec §4.8)
+  const pair2Commit = (pubB, nonceB) => sha256(C.utf8("NDP-PAIR2-COMMIT"), pubB, nonceB);
+  function pair2Derive(shared, pubB, pubC, nonceB, nonceC, label) {
+    const th = sha256(C.utf8("NDP-PAIR2-TH"), pubB, pubC, nonceB, nonceC, new Uint8Array([label.length]), label);
+    const k = hmacSha256(shared, th);
+    const m = hmacSha256(k, C.utf8("sas"));
+    const sas = ((m[0] * 16777216) + (m[1] << 16) + (m[2] << 8) + m[3]) % 1000000;
+    const psk = hmacSha256(k, C.utf8("psk"));
+    return { psk, keyId: keyIdOf(psk), sas };
+  }
+  const pair2OkProof = (psk, pubB, pubC) => hmacSha256(psk, C.utf8("NDP-PAIR2-OK"), pubB, pubC);
+  const formatSas = (sas) => { const s = String(sas).padStart(6, "0"); return s.slice(0, 3) + " " + s.slice(3); };
+
+  NDP.auth = { pair2Commit, pair2Derive, pair2OkProof, formatSas, codeDecode, codeEncode, derivePsk, keyIdOf, proofOf, sessionKeyOf, frameMac };
 })();

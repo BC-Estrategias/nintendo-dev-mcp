@@ -10,6 +10,7 @@ import {
 import { NdpProtocolError, NdpRemoteError, NdpTransportError } from "./errors.ts";
 import { bytesEqual, keyIdOf, LABEL_MAX, proofOf, sessionKeyOf, derivePsk, type KeyStore } from "./auth.ts";
 import { encodeFrame, encodeHeader, frameMac, FrameDecoder, type Frame, type FrameInit } from "./frame.ts";
+import { formatSas, PAIR2_NONCE, pair2Commit, pair2Derive, pair2OkProof, PairingRefusedError, randomNonce, randomSecret, x25519Public, x25519Shared } from "./pair2.ts";
 import { normalizePath } from "./path.ts";
 import { encodeTlv, parseTlv, str, u8, u16, u32, u64, type TlvField } from "./tlv.ts";
 
@@ -501,6 +502,41 @@ export class NdpClient {
     const expected = keyIdOf(psk);
     if (!keyId || !bytesEqual(keyId, expected)) throw new NdpProtocolError(Status.BAD_REQUEST, "console returned an unexpected key_id");
     return { psk, keyId };
+  }
+
+  /**
+   * Pairs by number comparison (agent >= 1.3.0; spec §4.8): the person opens the pairing window on the console (Y), this runs, and
+   * `onNumber` receives the 6-digit number to compare with the one on the console's screen (they press A there when equal). Resolves
+   * with the key once the console approved; rejects with PairingRefusedError when it said no. The key never crosses the network.
+   */
+  async pairByNumber(label: string, onNumber: (sas: string) => void, opts: { pollMs?: number; timeoutMs?: number } = {}): Promise<{ psk: Uint8Array; keyId: Uint8Array }> {
+    const labelBytes = new TextEncoder().encode(label);
+    if (labelBytes.length === 0 || labelBytes.length > LABEL_MAX) throw new RangeError(`label must be 1..${LABEL_MAX} bytes`);
+    this.#requireHello();
+    const secret = randomSecret(), pubB = x25519Public(secret), nonceB = randomNonce();
+    const begin = parseTlv((await this.request(Command.PAIR_BEGIN, encodeTlv([[Tag.LABEL, labelBytes], [Tag.PAIR_COMMIT, pair2Commit(pubB, nonceB)]]))).payload);
+    const pubC = begin.first(Tag.PAIR_PUB), nonceC = begin.first(Tag.PAIR_NONCE);
+    if (!pubC || pubC.length !== 32 || !nonceC || nonceC.length !== PAIR2_NONCE) throw new NdpProtocolError(Status.BAD_REQUEST, "malformed PAIR_BEGIN response");
+    await this.request(Command.PAIR_REVEAL, encodeTlv([[Tag.PAIR_PUB, pubB], [Tag.PAIR_NONCE, nonceB]]));
+    const shared = x25519Shared(secret, pubC);
+    if (!shared) throw new NdpProtocolError(Status.BAD_REQUEST, "the console sent an invalid key");
+    const keys = pair2Derive(shared, pubB, pubC, nonceB, nonceC, labelBytes);
+    onNumber(formatSas(keys.sas));
+    const deadline = Date.now() + (opts.timeoutMs ?? 90_000);
+    for (;;) {
+      const t = parseTlv((await this.request(Command.PAIR_POLL, new Uint8Array(0), SLOW_FS_TIMEOUT_MS)).payload);
+      const state = t.u8(Tag.PAIR_STATE);
+      if (state === 1) {
+        const proof = t.first(Tag.PROOF), kid = t.first(Tag.KEY_ID);
+        if (!proof || !bytesEqual(proof, pair2OkProof(keys.psk, pubB, pubC)) || !kid || !bytesEqual(kid, keys.keyId))
+          throw new NdpProtocolError(Status.UNAUTHORIZED, "the console derived a different key: someone may be in the middle; do not use this pairing");
+        return { psk: keys.psk, keyId: keys.keyId };
+      }
+      if (state === 2) throw new PairingRefusedError("denied", "the console refused (or the request expired)");
+      if (state === 3) throw new PairingRefusedError("full", "the console's pairing storage is full: press SELECT twice on it to forget the old ones");
+      if (Date.now() > deadline) throw new NdpTransportError("timed out waiting for the person at the console");
+      await new Promise((r) => setTimeout(r, opts.pollMs ?? 500));
+    }
   }
 
   /** Proves knowledge of the PSK and switches the connection to sealed frames. */

@@ -130,6 +130,14 @@
     await connect(); // a new connection: the console closes its pairing window after one pairing
   }
 
+  /** Pairing by number comparison: `onNumber` shows the number; the person confirms on the console. */
+  async function pairByNumber(label, remember, onNumber, signal) {
+    const c = S.client;
+    const { psk } = await c.pairByNumber(label, onNumber, { signal });
+    if (!store.save(S.deviceHex, { psk: C.hex(psk), label, at: Date.now() }, remember)) throw new Error("this browser cannot store the key");
+    await connect();
+  }
+
   function forgetThisBrowser() {
     store.forget(S.deviceHex);
     return connect();
@@ -150,6 +158,6 @@
   }
 
   S.hasStoredKey = () => !!(S.deviceHex && store.read()[S.deviceHex]);
-  Object.assign(S, { connect, pair, forgetThisBrowser, run, refreshContext: loadContext });
+  Object.assign(S, { connect, pair, pairByNumber, forgetThisBrowser, run, refreshContext: loadContext });
   NDP.session = S;
 })();

@@ -12,7 +12,7 @@ import { NdpClient } from "../src/index.ts";
 import { SKIP, startAgent } from "./helpers.ts";
 
 const WEB = fileURLToPath(new URL("../../../../web/js/", import.meta.url));
-for (const f of ["sha256.js", "codec.js", "auth.js", "client.js"]) await import(pathToFileURL(WEB + f).href);
+for (const f of ["sha256.js", "codec.js", "x25519.js", "auth.js", "client.js"]) await import(pathToFileURL(WEB + f).href);
 const NDP = (globalThis as any).NDP;
 const V = JSON.parse(readFileSync(fileURLToPath(new URL("../../../../docs/protocol/test-vectors/vectors.json", import.meta.url)), "utf8"));
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");

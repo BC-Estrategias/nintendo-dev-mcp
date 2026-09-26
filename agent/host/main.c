@@ -106,6 +106,9 @@ int main(int argc, char **argv) {
   static ndp_web_assets web_assets;
   static ndp_access access;
   const char *pair_code = NULL;
+  int pair_open = 0, approve = 0; /* approve: 0 = the person decides (nobody here), 1 = auto yes, 2 = auto no */
+  unsigned pair_delay_ms = 0, prompt_ms = 0;
+  uint64_t shown_at = 0;
   unsigned pair_ms = 600000;
   static ndp_keystore keys;
   static ndp_fs_ops fs_ops;
@@ -138,6 +141,13 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--keys-file") && i + 1 < argc) g_keys_file = argv[++i];
     else if (!strcmp(argv[i], "--pair-code") && i + 1 < argc) pair_code = argv[++i];
     else if (!strcmp(argv[i], "--pair-ms") && i + 1 < argc) pair_ms = (unsigned)atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--pair-open")) pair_open = 1;
+    else if (!strcmp(argv[i], "--pair-approve") && i + 1 < argc) {
+      const char *a = argv[++i];
+      approve = !strcmp(a, "auto") ? 1 : !strcmp(a, "deny") ? 2 : 0;
+    }
+    else if (!strcmp(argv[i], "--pair-delay-ms") && i + 1 < argc) pair_delay_ms = (unsigned)atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--pair-prompt-ms") && i + 1 < argc) prompt_ms = (unsigned)atoi(argv[++i]);
     else if (!strcmp(argv[i], "--read-root") && i + 1 < argc) {
       if (!custom_policy) { ndp_policy_init_default(&policy); policy.write_roots.count = 0; custom_policy = 1; }
       if (!custom_read) { policy.read_roots.count = 0; custom_read = 1; }
@@ -204,6 +214,12 @@ int main(int argc, char **argv) {
     if (ndp_code_decode(pair_code, code) != 0) { fprintf(stderr, "bad --pair-code\n"); return 2; }
     ndp_server_open_pairing(&srv, code, pair_ms);
   }
+  if (pair_open && !pair_code) { /* number-comparison pairing only: the code (for the legacy PAIR) is random and never shown */
+    uint8_t code[NDP_CODE_BYTES];
+    if (random_bytes(NULL, code, sizeof code) != 0) return 1;
+    ndp_server_open_pairing(&srv, code, pair_ms);
+  }
+  if (prompt_ms) srv.p2_prompt_ms = prompt_ms;
   if (idle_ms) srv.idle_timeout_ms = idle_ms;
 
   rc = ndp_server_listen(&srv, ia.s_addr, (uint16_t)port);
@@ -225,6 +241,22 @@ int main(int argc, char **argv) {
     if (ndp_server_step(&srv, 200) < 0) {
       fprintf(stderr, "[ERR] listener broken; re-listening\n");
       if (ndp_server_listen(&srv, ia.s_addr, (uint16_t)port) < 0) return 1;
+    }
+    if (ndp_server_pair2_pending(&srv)) {
+      /* the host has no screen: it prints what the console would show (the number goes to stdout, never to the log) so a
+       * test can compare it, and answers as configured */
+      struct timespec ts;
+      uint64_t now_ms;
+      clock_gettime(CLOCK_MONOTONIC, &ts);
+      now_ms = (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+      if (!shown_at) {
+        shown_at = now_ms;
+        printf("PAIR2 label=\"%s\" peer=%s number=%06u\n", srv.pairing.p2_label, srv.pairing.p2_peer, (unsigned)srv.pairing.p2_sas);
+        fflush(stdout);
+      }
+      if (approve && now_ms - shown_at >= pair_delay_ms) (void)ndp_server_pair2_decide(&srv, approve == 1);
+    } else {
+      shown_at = 0;
     }
     if (once && srv.connections_opened > 0 && srv.client_fd < 0) break;
   }

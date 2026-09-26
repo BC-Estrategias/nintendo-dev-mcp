@@ -50,6 +50,9 @@ typedef struct {
    * FAT). NULL => DEVICE_INFO answers UNSUPPORTED_COMMAND. Returns 0, or non-zero => IO_ERROR. */
   int (*device_info)(void *ctx, ndp_device_info *out);
   void *device_info_ctx;
+  /* Set by the server per connection: a small id for the connection and its peer address (for the pairing prompt). */
+  int conn_id;
+  const char *peer;
 } ndp_agent_config;
 
 typedef struct {

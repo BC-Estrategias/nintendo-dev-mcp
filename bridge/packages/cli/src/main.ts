@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { hostname } from "node:os";
 import { createInterface } from "node:readline/promises";
 import {
-  DEFAULT_PORT, KeyStore, LABEL_MAX, NdpClient, NdpRemoteError, NdpTransportError, PathInvalidError, codeDecode,
+  DEFAULT_PORT, KeyStore, LABEL_MAX, NdpClient, NdpRemoteError, NdpTransportError, PathInvalidError, codeDecode, PairingRefusedError,
   discover,
 } from "@ndev/core";
 
@@ -13,9 +13,10 @@ const USAGE = `ndev — Nintendo Dev Bridge (CLI)
 Usage:
   ndev find [port]                                scan this computer's subnets for a console running the agent
                                                   (the console's IP changes: DHCP)
-  ndev pair  <host[:port]> [--label NAME] [--code-stdin]
-                                                  pair this computer with the console: press Y on the console,
-                                                  then type the code it shows (the code is never sent)
+  ndev pair  <host[:port]> [--label NAME] [--code | --code-stdin]
+                                                  pair this computer with the console: press Y on the console, run this,
+                                                  and press A on the console when it shows the same number as here.
+                                                  --code: the older way (type the code the console shows)
   ndev unpair <host[:port]>                       forget this computer's key for that console
                                                   (to make the console forget ALL computers: its SELECT button)
   ndev pairings                                   list the consoles this computer is paired with
@@ -107,7 +108,7 @@ async function readCode(fromStdin: boolean): Promise<string> {
 }
 
 async function pairCommand(target: string, rest: string[]): Promise<number> {
-  const { text, on } = parseFlags(rest, [], ["--code-stdin"], ["--label"]);
+  const { text, on } = parseFlags(rest, [], ["--code-stdin", "--code"], ["--label"]);
   const { host, port } = parseTarget(target);
   const label = text.get("--label") ?? hostname().split(".")[0]!.slice(0, LABEL_MAX);
   if (new TextEncoder().encode(label).length > LABEL_MAX) throw new Error(`--label must be at most ${LABEL_MAX} bytes`);
@@ -124,6 +125,25 @@ async function pairCommand(target: string, rest: string[]): Promise<number> {
     if (!info.pairingOpen) {
       console.error("The console's pairing window is closed. Press Y on the console (it opens for 2 minutes), then run this again.");
       return 1;
+    }
+    if (!on.has("--code") && !on.has("--code-stdin")) {
+      // by number comparison: nothing to type. The console shows the same number; the person presses A there.
+      try {
+        const { psk, keyId } = await client.pairByNumber(label, (sas) => {
+          console.log(`Number: ${sas}`);
+          console.log("Press A on the console if it shows the same number (B if not).");
+        });
+        keys.save({ deviceId: id, psk: Buffer.from(psk).toString("hex"), keyId: Buffer.from(keyId).toString("hex"), label, lastHost: host, pairedAt: new Date().toISOString() });
+        console.log(`Paired with console ${id.slice(0, 8)}… as "${label}". Key saved in ${keys.path} (private to your user).`);
+        return 0;
+      } catch (e) {
+        if (e instanceof PairingRefusedError) { console.error(e.message); return 1; }
+        if (e instanceof NdpRemoteError && e.statusName === "UNAUTHORIZED" && /authentication required/.test(e.detail ?? "")) {
+          console.error("This console is older than v1.3.0 and only pairs with the code: run again with --code.");
+          return 1;
+        }
+        throw e;
+      }
     }
     const code = codeDecode(await readCode(on.has("--code-stdin")));
     if (!code) throw new Error("that is not a valid code (16 characters: 0-9 and A-Z without I, L, O, U)");

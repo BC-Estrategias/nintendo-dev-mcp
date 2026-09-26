@@ -38,11 +38,34 @@ typedef struct {
   int count;
 } ndp_keystore;
 
+/* Stages of pairing by number comparison (spec §4.8). */
+typedef enum {
+  NDP_P2_IDLE = 0,
+  NDP_P2_COMMITTED = 1, /* the client committed; the console sent its key and waits for the client's */
+  NDP_P2_WAITING = 2,   /* the number is on the console's screen: waiting for the person (A = yes, B = no) */
+  NDP_P2_APPROVED = 3,  /* the person said yes: the key is stored, the client collects it with PAIR_POLL */
+  NDP_P2_DENIED = 4,    /* the person said no, or the request expired */
+  NDP_P2_FULL = 5       /* the person said yes but the key store is full */
+} ndp_p2_stage;
+#define NDP_P2_MAX_ATTEMPTS 5
+
 /* Pairing window, owned by the platform (it outlives connections). */
 typedef struct {
   int active;
   uint8_t code[NDP_CODE_BYTES];
   uint64_t expires_ms;
+  /* number comparison: one request at a time */
+  int p2_stage;
+  int p2_owner;                /* which connection made the request (a small id given by the server) */
+  int p2_attempts;             /* failed or denied requests in this window */
+  uint8_t p2_commit[32];
+  uint8_t p2_secret[32];       /* the console's ephemeral X25519 secret: wiped as soon as the shared secret exists */
+  uint8_t p2_pub_c[32], p2_pub_b[32], p2_nonce_c[16], p2_nonce_b[16];
+  uint8_t p2_psk[32];
+  uint32_t p2_sas;             /* the number on the screen, 0..999999 */
+  char p2_label[NDP_LABEL_MAX + 1];
+  char p2_peer[24];
+  uint64_t p2_deadline_ms;     /* 0 = the server sets it on its next step */
 } ndp_pairing;
 
 /* Adds a key. Returns NDP_OK, or NDP_ST_NO_SPACE when the store is full. An identical key is a no-op. */

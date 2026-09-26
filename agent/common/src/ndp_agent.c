@@ -165,6 +165,9 @@ static size_t handle_inner(ndp_agent *a, const ndp_header *req, const uint8_t *p
   if (a->sec.required) {
     if (!a->sec.authed) { /* before AUTH only PAIR and AUTH are served (spec §4.6) */
       if (req->command == NDP_CMD_PAIR) return ndp_agent_pair(a, req, payload, out, cap);
+      if (req->command == NDP_CMD_PAIR_BEGIN) return ndp_agent_pair_begin(a, req, payload, out, cap);
+      if (req->command == NDP_CMD_PAIR_REVEAL) return ndp_agent_pair_reveal(a, req, payload, out, cap);
+      if (req->command == NDP_CMD_PAIR_POLL) return ndp_agent_pair_poll(a, req, payload, out, cap);
       if (req->command == NDP_CMD_AUTH) return ndp_agent_auth(a, req, payload, out, cap);
       return ndp_agent_error(out, cap, req, NDP_ST_UNAUTHORIZED, "authentication required", 0);
     }

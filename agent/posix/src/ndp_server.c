@@ -53,6 +53,7 @@ static void hard_close(int fd) {
 #define HTTP_IDLE_MS 10000u
 #define WS_BASE NDP_WS_HEADER_MAX
 
+static void p2_reset(ndp_server *s);
 static ndp_conn *rawc(ndp_server *s) { return &s->nc[0]; }
 static ndp_conn *webc(ndp_server *s) { return &s->nc[1]; }
 
@@ -93,6 +94,7 @@ void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_a
   s->agent_cfg.keys_changed = server_keys_changed;
   s->agent_cfg.keys_ctx = s;
   s->idle_timeout_ms = 120000;
+  s->p2_prompt_ms = NDP_P2_PROMPT_MS;
   s->listen_fd = -1;
   s->client_fd = -1;
   s->web_listen_fd = -1;
@@ -100,6 +102,8 @@ void ndp_server_init(ndp_server *s, const ndp_server_platform *plat, const ndp_a
   for (i = 0; i < 2; i++) {
     s->nc[i].fd = -1;
     ndp_agent_init(&s->nc[i].agent, &s->agent_cfg);
+    s->nc[i].agent.cfg.conn_id = i;
+    s->nc[i].agent.cfg.peer = s->nc[i].peer;
     ndp_decoder_init(&s->nc[i].dec, s->nc[i].rbuf, sizeof s->nc[i].rbuf, cfg->max_frame);
   }
   for (i = 0; i < NDP_WEB_HTTP_SLOTS; i++) s->http[i].fd = -1;
@@ -117,14 +121,44 @@ void ndp_server_open_pairing(ndp_server *s, const uint8_t code[NDP_CODE_BYTES], 
   memcpy(s->pairing.code, code, NDP_CODE_BYTES);
   s->pairing.active = 1;
   s->pairing.expires_ms = now(s) + duration_ms;
+  p2_reset(s);
+  s->pairing.p2_attempts = 0;
   slog(s, "[PAIR] window open for %lu s", (unsigned long)(duration_ms / 1000u));
 }
 
 void ndp_server_close_pairing(ndp_server *s) {
+  p2_reset(s);
   if (!s->pairing.active) return;
   s->pairing.active = 0;
   memset(s->pairing.code, 0, sizeof s->pairing.code);
   slog(s, "[PAIR] window closed");
+}
+
+int ndp_server_pair2_pending(const ndp_server *s) { return s->pairing.p2_stage == NDP_P2_WAITING; }
+
+/* The person at the console answered the number prompt. Returns 0, or -1 when there is nothing to answer. */
+int ndp_server_pair2_decide(ndp_server *s, int approve) {
+  ndp_pairing *p = &s->pairing;
+  if (p->p2_stage != NDP_P2_WAITING) return -1;
+  if (approve) {
+    if (ndp_keystore_add(&s->keys, p->p2_psk, p->p2_label) != NDP_OK) {
+      p->p2_stage = NDP_P2_FULL;
+      slog(s, "[PAIR2] %s approved but the key store is full", p->p2_label);
+    } else {
+      p->p2_stage = NDP_P2_APPROVED;
+      slog(s, "[PAIR2] paired %s from %s", p->p2_label, p->p2_peer);
+      server_keys_changed(s, &s->keys);
+      p->active = 0; /* the window is single-use */
+      memset(p->code, 0, sizeof p->code);
+    }
+  } else {
+    p->p2_stage = NDP_P2_DENIED;
+    p->p2_attempts++;
+    memset(p->p2_psk, 0, sizeof p->p2_psk);
+    slog(s, "[PAIR2] %s from %s was refused", p->p2_label, p->p2_peer);
+    if (p->p2_attempts >= NDP_P2_MAX_ATTEMPTS) { p->active = 0; memset(p->code, 0, sizeof p->code); slog(s, "[PAIR] window closed after %d refused requests", p->p2_attempts); }
+  }
+  return 0;
 }
 
 uint32_t ndp_server_pairing_remaining_ms(ndp_server *s) {
@@ -151,9 +185,19 @@ void ndp_server_set_mode(ndp_server *s, ndp_mode mode) {
   for (i = 0; i < 2; i++) ndp_agent_set_mode(&s->nc[i].agent, mode);
 }
 
+static void p2_reset(ndp_server *s) {
+  s->pairing.p2_stage = NDP_P2_IDLE;
+  memset(s->pairing.p2_secret, 0, sizeof s->pairing.p2_secret);
+  memset(s->pairing.p2_psk, 0, sizeof s->pairing.p2_psk);
+  s->pairing.p2_sas = 0;
+  s->pairing.p2_deadline_ms = 0;
+}
+
 static void close_conn(ndp_server *s, ndp_conn *c, const char *reason) {
   if (c->fd < 0) return;
   ndp_agent_close(&c->agent); /* releases an open directory / aborts a transfer */
+  if (s->pairing.p2_owner == (c == webc(s) ? 1 : 0) && (s->pairing.p2_stage == NDP_P2_COMMITTED || s->pairing.p2_stage == NDP_P2_WAITING))
+    p2_reset(s); /* the client that asked is gone: its request goes with it */
   hard_close(c->fd);
   c->fd = -1;
   c->kind = NDP_CONN_NONE;
@@ -426,6 +470,8 @@ static void fmt_peer(char *dst, size_t cap, const struct sockaddr_in *sa) {
 
 static void adopt(ndp_server *s, ndp_conn *c, int fd, ndp_conn_kind kind, const char *peer) {
   ndp_agent_init(&c->agent, &s->agent_cfg);
+  c->agent.cfg.conn_id = (c == rawc(s)) ? 0 : 1; /* who owns a pairing request */
+  c->agent.cfg.peer = c->peer;
   ndp_decoder_init(&c->dec, c->rbuf, sizeof c->rbuf, s->agent_cfg.max_frame);
   reset_session_state(c);
   ndp_ws_dec_init(&c->wsd);
@@ -698,9 +744,22 @@ int ndp_server_step(ndp_server *s, int timeout_ms) {
   }
   for (i = 0; i < NDP_WEB_HTTP_SLOTS; i++)
     if (s->http[i].fd >= 0 && now(s) - s->http[i].started_ms > HTTP_IDLE_MS) close_http(s, &s->http[i]);
-  if (s->pairing.active && now(s) >= s->pairing.expires_ms) {
-    ndp_server_close_pairing(s);
-    changed = 1;
+  {
+    ndp_pairing *p = &s->pairing;
+    if (p->p2_stage == NDP_P2_COMMITTED || p->p2_stage == NDP_P2_WAITING) {
+      if (p->p2_deadline_ms == 0) p->p2_deadline_ms = now(s) + (p->p2_stage == NDP_P2_WAITING ? s->p2_prompt_ms : NDP_P2_COMMIT_MS);
+      if (now(s) >= p->p2_deadline_ms) {
+        slog(s, "[PAIR2] request from %s expired", p->p2_peer);
+        if (p->p2_stage == NDP_P2_WAITING) { p->p2_stage = NDP_P2_DENIED; p->p2_attempts++; memset(p->p2_psk, 0, sizeof p->p2_psk); }
+        else p2_reset(s);
+        changed = 1;
+      }
+    }
+    /* the window closes on its own, but never under a number the person is looking at */
+    if (p->active && now(s) >= p->expires_ms && p->p2_stage != NDP_P2_WAITING) {
+      ndp_server_close_pairing(s);
+      changed = 1;
+    }
   }
   sync_public(s);
   return changed;

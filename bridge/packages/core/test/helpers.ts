@@ -15,7 +15,7 @@ if (!SKIP && !existsSync(AGENT)) {
   );
 }
 
-export function startAgent(args: string[] = []): Promise<{ proc: ChildProcess; port: number; webPort: number | undefined; log: () => string }> {
+export function startAgent(args: string[] = []): Promise<{ proc: ChildProcess; port: number; webPort: number | undefined; log: () => string; stdout: () => string }> {
   return new Promise((resolve, reject) => {
     const proc = spawn(AGENT, ["--port", "0", "-v", ...args], { stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
@@ -29,7 +29,7 @@ export function startAgent(args: string[] = []): Promise<{ proc: ChildProcess; p
       // when a web port was requested the WEB line follows LISTENING: wait for it too
       if (m && (w || !args.includes("--web-port"))) {
         clearTimeout(timer);
-        resolve({ proc, port: Number(m[1]), webPort: w ? Number(w[1]) : undefined, log: () => err });
+        resolve({ proc, port: Number(m[1]), webPort: w ? Number(w[1]) : undefined, log: () => err, stdout: () => out });
       }
     });
     proc.on("error", reject);

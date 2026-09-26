@@ -193,6 +193,40 @@
       return { psk, keyId };
     }
 
+    /** Pairing by number comparison: `onNumber("482 913")` gets the number to compare with the console's screen; resolves with
+     * {psk, keyId} once the person pressed A on the console. Rejects with an error whose .refused is "denied" | "full" if not. */
+    async pairByNumber(label, onNumber, opts) {
+      const o = opts || {};
+      const lb = C.utf8(label);
+      if (lb.length === 0 || lb.length > 15) throw new RangeError("label must be 1..15 bytes");
+      const X = NDP.x25519;
+      const secret = crypto.getRandomValues(new Uint8Array(32)), nonceB = crypto.getRandomValues(new Uint8Array(16));
+      const pubB = X.publicKey(secret);
+      const begin = C.parseTlv((await this.request(Command.PAIR_BEGIN, C.encodeTlv([[Tag.LABEL, lb], [Tag.PAIR_COMMIT, A.pair2Commit(pubB, nonceB)]]), SLOW_MS)).payload);
+      const pubC = begin.first(Tag.PAIR_PUB), nonceC = begin.first(Tag.PAIR_NONCE);
+      if (!pubC || pubC.length !== 32 || !nonceC || nonceC.length !== 16) throw new NdpTransportError("malformed PAIR_BEGIN response");
+      await this.request(Command.PAIR_REVEAL, C.encodeTlv([[Tag.PAIR_PUB, pubB], [Tag.PAIR_NONCE, nonceB]]), SLOW_MS);
+      const shared = X.shared(secret, pubC);
+      if (!shared) throw new NdpTransportError("the console sent an invalid key");
+      const keys = A.pair2Derive(shared, pubB, pubC, nonceB, nonceC, lb);
+      onNumber(A.formatSas(keys.sas));
+      const deadline = Date.now() + (o.timeoutMs || 90000);
+      for (;;) {
+        if (o.signal && o.signal.aborted) throw new NdpTransportError("aborted");
+        const t = C.parseTlv((await this.request(Command.PAIR_POLL, new Uint8Array(0), SLOW_MS)).payload);
+        const state = t.u8(Tag.PAIR_STATE);
+        if (state === 1) {
+          const proof = t.first(Tag.PROOF), kid = t.first(Tag.KEY_ID);
+          if (!proof || !C.equal(proof, A.pair2OkProof(keys.psk, pubB, pubC)) || !kid || !C.equal(kid, keys.keyId))
+            throw new NdpTransportError("the console derived a different key: someone may be in the middle; do not use this pairing");
+          return { psk: keys.psk, keyId: keys.keyId };
+        }
+        if (state === 2 || state === 3) { const e = new NdpTransportError(state === 2 ? "refused" : "full"); e.refused = state === 2 ? "denied" : "full"; throw e; }
+        if (Date.now() > deadline) throw new NdpTransportError("timed out waiting for the person at the console");
+        await sleep(o.pollMs || 500);
+      }
+    }
+
     async authenticate(psk) {
       if (this.session) throw new Error("already authenticated");
       const payload = C.encodeTlv([[Tag.KEY_ID, A.keyIdOf(psk)], [Tag.PROOF, A.proofOf(psk, "auth", this.cn, this.info.deviceNonce)]]);
