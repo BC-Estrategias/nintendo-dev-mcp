@@ -341,8 +341,19 @@ static void test_keystore(void) {
     snprintf(lab, sizeof lab, "pc%d", j);
     CHECK(ndp_keystore_add(&ks, psk, lab) == NDP_OK, "add %d", j);
   }
-  memset(psk, 9, 32);
-  CHECK(ndp_keystore_add(&ks, psk, "extra") == NDP_ST_NO_SPACE, "store full");
+  { /* a full store never refuses a pairing: the same name replaces itself, otherwise the oldest goes */
+    ndp_keystore k2 = ks, k3;
+    int lastk = NDP_MAX_KEYS - 1;
+    memset(psk, 9, 32);
+    CHECK(ndp_keystore_replace_target(&k2, "extra") == 0, "full: the oldest would be dropped");
+    CHECK(ndp_keystore_add(&k2, psk, "extra") == NDP_OK && k2.count == NDP_MAX_KEYS && strcmp(k2.keys[lastk].label, "extra") == 0 &&
+              strcmp(k2.keys[0].label, "pc1") == 0 && memcmp(k2.keys[lastk].psk, psk, 32) == 0, "full: oldest dropped, the new one is last");
+    memset(psk, 10, 32);
+    CHECK(ndp_keystore_replace_target(&k2, "pc3") == 2, "the same label is the target");
+    CHECK(ndp_keystore_add(&k2, psk, "pc3") == NDP_OK && k2.count == NDP_MAX_KEYS && strcmp(k2.keys[2].label, "pc3") == 0 && memcmp(k2.keys[2].psk, psk, 32) == 0, "the same label replaces in place");
+    ndp_keystore_clear(&k3);
+    CHECK(ndp_keystore_replace_target(&k3, "new") == -1 && ndp_keystore_add(&k3, psk, "new") == NDP_OK && k3.count == 1, "room left: nothing replaced");
+  }
   memset(psk, 1, 32);
   CHECK(ndp_keystore_add(&ks, psk, "dup") == NDP_OK && ks.count == NDP_MAX_KEYS, "an identical key is a no-op");
   n = ndp_keystore_serialize(&ks, buf, sizeof buf);

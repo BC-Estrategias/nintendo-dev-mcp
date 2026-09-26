@@ -473,7 +473,7 @@ def sealed(session, counter, kind, request_id, command, status=0, payload=b"", v
     return unsigned + mac_of(session, counter, unsigned)
 
 
-MAX_KEYS = 4
+MAX_KEYS = 8
 MAX_FAILS = 5
 AUTH_DEVICE_ID = bytes(range(0x50, 0x60))
 AUTH_NONCE = bytes(range(0xC0, 0xD0))
@@ -590,9 +590,15 @@ class AuthAgent:
         psk = derive_psk(self.pairing_code)
         if not hmac.compare_digest(proof, proof_of(psk, "pair", self.cn, self.dn, label)):
             return self._fail(req, "wrong pairing code")
-        if len(self.keys) >= MAX_KEYS:
-            return self._err(req, "NO_SPACE", "pairing storage is full")
-        self.keys.append((psk, label.decode()))
+        # never "full": the same label is replaced in place; otherwise, when full, the oldest key goes
+        for idx, (_p, lab) in enumerate(self.keys):
+            if lab == label.decode():
+                self.keys[idx] = (psk, label.decode())
+                break
+        else:
+            if len(self.keys) >= MAX_KEYS:
+                self.keys.pop(0)
+            self.keys.append((psk, label.decode()))
         self.pairing_open = False
         return self._reply(frame("RES", req["id"], req["cmd"], 0, tlv(T_KEY_ID, key_id_of(psk))))
 
@@ -692,7 +698,9 @@ def build_auth_vectors():
         hello_wire(1)] + [pair_wire(2 + i, b"x", bytes(32)) for i in range(5)] + [hello_wire(9)]))
     dialogues.append(dlg("pair_proof_bound_to_label", A(keys=[], pairing_open=True, pairing_code=code_c), lambda: [
         hello_wire(1), pair_wire(2, b"other", proof_of(psk_c, "pair", BRIDGE_NONCE, AUTH_NONCE, b"my-mac"))]))
-    dialogues.append(dlg("pair_storage_full", A(keys=[(derive_psk(bytes([i] * 10)), f"k{i}") for i in range(4)], pairing_open=True, pairing_code=code_c), lambda: [
+    dialogues.append(dlg("pair_storage_full_replaces_oldest", A(keys=[(derive_psk(bytes([i] * 10)), f"k{i}") for i in range(8)], pairing_open=True, pairing_code=code_c), lambda: [
+        hello_wire(1), pair_wire(2, b"my-mac", proof_of(psk_c, "pair", BRIDGE_NONCE, AUTH_NONCE, b"my-mac"))]))
+    dialogues.append(dlg("pair_same_label_replaces", A(keys=[(derive_psk(bytes([1] * 10)), "my-mac"), (derive_psk(bytes([2] * 10)), "other")], pairing_open=True, pairing_code=code_c), lambda: [
         hello_wire(1), pair_wire(2, b"my-mac", proof_of(psk_c, "pair", BRIDGE_NONCE, AUTH_NONCE, b"my-mac"))]))
     dialogues.append(dlg("pair_bad_fields", A(keys=[], pairing_open=True, pairing_code=code_c), lambda: [
         hello_wire(1), frame("REQ", 2, CMD_PAIR, 0, tlv(T_LABEL, b"x")), frame("REQ", 3, CMD_PAIR, 0, tlv(T_LABEL, b"x" * 16) + tlv(T_PROOF, bytes(32)))]))
@@ -1321,7 +1329,7 @@ def emit_auth(a) -> str:
                  f"{1 if d['config']['pairing_open'] else 0}, v_ad_{di}_code, {1 if d['config']['rng_fail'] else 0}, "
                  f"{len(d['store_after'])}, {1 if d['pairing_open_after'] else 0}}},\n")
     L.append("};\n#define V_ADLG_N %d\n" % len(a["dialogues"]))
-    L.append("static const uint8_t *const v_aafter[][5] = {\n")
+    L.append("static const uint8_t *const v_aafter[][9] = {\n")
     for di, d, *_ in dl_rows:
         L.append("  {" + ", ".join(f"v_ad_{di}_after{ki}" for ki in range(len(d["store_after"]))) + (", " if d["store_after"] else "") + "0},\n")
     L.append("};\n")

@@ -7,7 +7,7 @@
 
 #define NDP_CODE_BYTES 10
 #define NDP_CODE_TEXT 20 /* "XXXX-XXXX-XXXX-XXXX" + NUL */
-#define NDP_MAX_KEYS 4
+#define NDP_MAX_KEYS 8
 #define NDP_LABEL_MAX 15
 #define NDP_MAX_AUTH_FAILS 5
 
@@ -68,8 +68,12 @@ typedef struct {
   uint64_t p2_deadline_ms;     /* 0 = the server sets it on its next step */
 } ndp_pairing;
 
-/* Adds a key. Returns NDP_OK, or NDP_ST_NO_SPACE when the store is full. An identical key is a no-op. */
+/* Adds a key; it never fails for lack of room: an identical key is a no-op, a new pairing with the SAME label replaces that
+ * label's earlier key (the same browser pairing again), and when the store is full the OLDEST key is dropped. Returns NDP_OK. */
 int ndp_keystore_add(ndp_keystore *ks, const uint8_t psk[32], const char *label);
+/* What ndp_keystore_add would drop for a new pairing named `label`: the index of the entry with that label, or (when full) 0,
+ * the oldest; -1 when nothing is replaced. The console tells the person before they press A. */
+int ndp_keystore_replace_target(const ndp_keystore *ks, const char *label);
 void ndp_keystore_clear(ndp_keystore *ks);
 
 /* File format: "NDPK" version(1) count(1) rsvd(2) device_id[16] count x {key_id[4] psk[32] label[16]} sha256(all before)[32]. */

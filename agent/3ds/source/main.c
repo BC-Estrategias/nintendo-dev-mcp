@@ -287,10 +287,6 @@ static void open_pairing(void) {
     memset(code, 0, sizeof code);
     return;
   }
-  if (g_srv.keys.count >= NDP_MAX_KEYS) {
-    alog("Pairing: storage full (%d computers). Press SELECT twice to forget them all.", NDP_MAX_KEYS);
-    return;
-  }
   if (random_bytes(NULL, code, sizeof code) != 0) {
     alog("Pairing unavailable: no secure random source");
     return;
@@ -507,6 +503,10 @@ static void draw(uint64_t now) {
       printf("\n" C_YELLOW "PAIRING REQUEST" C_RESET " from %s\n\"%s\"\nNumber: " C_CYAN "%03u %03u" C_RESET "\n"
              "Same number on the page / computer?\n" C_GREEN "A = YES, pair" C_RESET "   " C_RED "B = NO" C_RESET "\n",
              g_srv.pairing.p2_peer, g_srv.pairing.p2_label, sas / 1000u, sas % 1000u);
+      {
+        int rep = ndp_keystore_replace_target(&g_srv.keys, g_srv.pairing.p2_label);
+        if (rep >= 0) printf("(replaces the earlier pairing \"%s\")\n", g_srv.keys.keys[rep].label);
+      }
     } else if (left > 0) {
       char text[NDP_CODE_TEXT];
       ndp_code_encode(g_srv.pairing.code, text);

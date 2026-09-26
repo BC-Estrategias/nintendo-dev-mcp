@@ -75,18 +75,34 @@ void ndp_session_key(const uint8_t psk[32], const uint8_t cn[16], const uint8_t 
 
 void ndp_keystore_clear(ndp_keystore *ks) { memset(ks, 0, sizeof *ks); }
 
+int ndp_keystore_replace_target(const ndp_keystore *ks, const char *label) {
+  int i;
+  for (i = 0; i < ks->count; i++)
+    if (strncmp(ks->keys[i].label, label, NDP_LABEL_MAX) == 0) return i;
+  return ks->count >= NDP_MAX_KEYS ? 0 : -1;
+}
+
 int ndp_keystore_add(ndp_keystore *ks, const uint8_t psk[32], const char *label) {
   uint8_t id[4];
-  int i;
+  ndp_paired_key *slot;
+  int i, target;
   ndp_key_id(psk, id);
   for (i = 0; i < ks->count; i++)
     if (memcmp(ks->keys[i].key_id, id, 4) == 0 && ndp_ct_equal(ks->keys[i].psk, psk, 32)) return NDP_OK;
-  if (ks->count >= NDP_MAX_KEYS) return NDP_ST_NO_SPACE;
-  memcpy(ks->keys[ks->count].key_id, id, 4);
-  memcpy(ks->keys[ks->count].psk, psk, 32);
-  memset(ks->keys[ks->count].label, 0, sizeof ks->keys[ks->count].label);
-  strncpy(ks->keys[ks->count].label, label, NDP_LABEL_MAX);
-  ks->count++;
+  target = ndp_keystore_replace_target(ks, label);
+  if (target >= 0 && strncmp(ks->keys[target].label, label, NDP_LABEL_MAX) == 0) {
+    slot = &ks->keys[target]; /* the same name pairing again: its old key is replaced in place */
+  } else {
+    if (target >= 0) { /* full: the oldest goes */
+      memmove(&ks->keys[0], &ks->keys[1], (size_t)(ks->count - 1) * sizeof ks->keys[0]);
+      ks->count--;
+    }
+    slot = &ks->keys[ks->count++];
+  }
+  memcpy(slot->key_id, id, 4);
+  memcpy(slot->psk, psk, 32);
+  memset(slot->label, 0, sizeof slot->label);
+  strncpy(slot->label, label, NDP_LABEL_MAX);
   return NDP_OK;
 }
 

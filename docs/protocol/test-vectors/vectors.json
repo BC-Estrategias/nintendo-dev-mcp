@@ -2576,7 +2576,7 @@
     "pairing_open_after": true
    },
    {
-    "name": "pair_storage_full",
+    "name": "pair_storage_full_replaces_oldest",
     "config": {
      "keys": [
       {
@@ -2594,6 +2594,22 @@
       {
        "psk_hex": "67bc4dea0fec270a707fadf30444be215cffd3820e68e9209fc1adfed478c54a",
        "label": "k3"
+      },
+      {
+       "psk_hex": "0e9e32b3e5ce79b0751f1d657506c207d3df942e523e83490e6143d8b33f2cb4",
+       "label": "k4"
+      },
+      {
+       "psk_hex": "e64149b04302644daebe3ea3b7dc53a6bcf64ca9890d824482682a7beef9e24e",
+       "label": "k5"
+      },
+      {
+       "psk_hex": "befe43037ab16699d41b2a0e157137367e8bc9384c0ad32271c16b3b56689156",
+       "label": "k6"
+      },
+      {
+       "psk_hex": "5fd499c12dc675743cdaf035ec9bb7df0e2ef85515431772996ed8f897bf4705",
+       "label": "k7"
       }
      ],
      "pairing_open": true,
@@ -2603,21 +2619,16 @@
     "steps": [
      {
       "request_hex": "4e4450310101000001000000010000002e00000010000200010011000200010012000a006e6465762f302e322e3013001000000102030405060708090a0b0c0d0e0f",
-      "response_hex": "4e4450310102000001000000010000006a00000010000200010014000400686f737415000500302e312e3013001000c0c1c2c3c4c5c6c7c8c9cacbcccdcecf16000800726571756972656417000900524541445f4f4e4c59180004000000010049001000505152535455565758595a5b5c5d5e5f47000100044800010001",
+      "response_hex": "4e4450310102000001000000010000006a00000010000200010014000400686f737415000500302e312e3013001000c0c1c2c3c4c5c6c7c8c9cacbcccdcecf16000800726571756972656417000900524541445f4f4e4c59180004000000010049001000505152535455565758595a5b5c5d5e5f47000100084800010001",
       "close": false
      },
      {
       "request_hex": "4e4450310101000002000000040000002e0000004c0006006d792d6d61634b002000dd5a401aaf6df3d3a6fba4fab4a0ed908d46254fac73754cb14e47613996c774",
-      "response_hex": "4e4450310105000002000000040008001b0000000100170070616972696e672073746f726167652069732066756c6c",
+      "response_hex": "4e445031010200000200000004000000080000004a000400d043ae5a",
       "close": false
      }
     ],
     "store_after": [
-     {
-      "key_id_hex": "8886c4a9",
-      "psk_hex": "01e45a21964801e9948a22082339199db144f1ed26a79890e19059679ef071f0",
-      "label": "k0"
-     },
      {
       "key_id_hex": "424f8c28",
       "psk_hex": "23813c3f074248bf063d2f05d1895e8d37884ee7261316ac4a2977db3d5daef6",
@@ -2632,9 +2643,77 @@
       "key_id_hex": "af7f108c",
       "psk_hex": "67bc4dea0fec270a707fadf30444be215cffd3820e68e9209fc1adfed478c54a",
       "label": "k3"
+     },
+     {
+      "key_id_hex": "b9d76b13",
+      "psk_hex": "0e9e32b3e5ce79b0751f1d657506c207d3df942e523e83490e6143d8b33f2cb4",
+      "label": "k4"
+     },
+     {
+      "key_id_hex": "9c1ef7af",
+      "psk_hex": "e64149b04302644daebe3ea3b7dc53a6bcf64ca9890d824482682a7beef9e24e",
+      "label": "k5"
+     },
+     {
+      "key_id_hex": "c8ea04e0",
+      "psk_hex": "befe43037ab16699d41b2a0e157137367e8bc9384c0ad32271c16b3b56689156",
+      "label": "k6"
+     },
+     {
+      "key_id_hex": "9d0fd4a5",
+      "psk_hex": "5fd499c12dc675743cdaf035ec9bb7df0e2ef85515431772996ed8f897bf4705",
+      "label": "k7"
+     },
+     {
+      "key_id_hex": "d043ae5a",
+      "psk_hex": "a4ce1614e1c2d172e415ff4921d6907225e8ee0f91e768d61ac4af125e6c9287",
+      "label": "my-mac"
      }
     ],
-    "pairing_open_after": true
+    "pairing_open_after": false
+   },
+   {
+    "name": "pair_same_label_replaces",
+    "config": {
+     "keys": [
+      {
+       "psk_hex": "23813c3f074248bf063d2f05d1895e8d37884ee7261316ac4a2977db3d5daef6",
+       "label": "my-mac"
+      },
+      {
+       "psk_hex": "4fc09636f3fbb5e7f85e96619822410174501669771ad9ec2bb0222f6b41915c",
+       "label": "other"
+      }
+     ],
+     "pairing_open": true,
+     "pairing_code_hex": "6465666768696a6b6c6d",
+     "rng_fail": false
+    },
+    "steps": [
+     {
+      "request_hex": "4e4450310101000001000000010000002e00000010000200010011000200010012000a006e6465762f302e322e3013001000000102030405060708090a0b0c0d0e0f",
+      "response_hex": "4e4450310102000001000000010000006a00000010000200010014000400686f737415000500302e312e3013001000c0c1c2c3c4c5c6c7c8c9cacbcccdcecf16000800726571756972656417000900524541445f4f4e4c59180004000000010049001000505152535455565758595a5b5c5d5e5f47000100024800010001",
+      "close": false
+     },
+     {
+      "request_hex": "4e4450310101000002000000040000002e0000004c0006006d792d6d61634b002000dd5a401aaf6df3d3a6fba4fab4a0ed908d46254fac73754cb14e47613996c774",
+      "response_hex": "4e445031010200000200000004000000080000004a000400d043ae5a",
+      "close": false
+     }
+    ],
+    "store_after": [
+     {
+      "key_id_hex": "d043ae5a",
+      "psk_hex": "a4ce1614e1c2d172e415ff4921d6907225e8ee0f91e768d61ac4af125e6c9287",
+      "label": "my-mac"
+     },
+     {
+      "key_id_hex": "4e717913",
+      "psk_hex": "4fc09636f3fbb5e7f85e96619822410174501669771ad9ec2bb0222f6b41915c",
+      "label": "other"
+     }
+    ],
+    "pairing_open_after": false
    },
    {
     "name": "pair_bad_fields",
