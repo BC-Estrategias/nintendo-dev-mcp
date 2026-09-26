@@ -19,8 +19,15 @@
 #include "ndp/ndp_keystore_file.h"
 #include "ndp/ndp_posix_fs.h"
 #include "ndp/ndp_server.h"
+#include "ndp_web_assets_data.h"
 
 #define AGENT_PORT NDP_DEFAULT_PORT
+/* The web page (file manager for the browser) is served on its own port by this same app. It is on when the app
+ * starts and R turns it off/on; it needs the same pairing as the CLI, and the console stays READ_ONLY until X. */
+#define AGENT_WEB_PORT 8080
+#ifndef AGENT_WEB_DEFAULT
+#define AGENT_WEB_DEFAULT 1
+#endif
 
 /* The agent starts READ_ONLY: nothing can be written until the person at the console presses X (DEVELOPMENT mode).
  * Even then writes only reach the folders opened in the on-console folder editor (A), never the protected system
@@ -154,7 +161,8 @@ static int fs_remove(void *ctx, const char *path) {
 
 static u32 *g_soc_buf = NULL;
 static bool g_soc_up = false, g_ndm_locked = false, g_ps_ok = false;
-static bool g_wifi = false, g_listening = false;
+static bool g_wifi = false, g_listening = false, g_web_on = AGENT_WEB_DEFAULT, g_web_listening = false;
+static ndp_web_assets g_web_assets;
 static in_addr_t g_ip = 0;
 static char g_err[64] = "";
 static uint64_t g_next_soc_try = 0, g_next_listen_try = 0, g_last_check = 0;
@@ -318,8 +326,28 @@ static bool start_soc(uint64_t now) {
 }
 
 static void stop_listening(void) {
-  ndp_server_close(&g_srv);
+  ndp_server_close(&g_srv); /* also closes the web listener and the page's clients */
   g_listening = false;
+  g_web_listening = false;
+}
+
+/* (Re)starts or stops the web listener to match the switch (R) and the state of the NDP listener. */
+static void sync_web(void) {
+  int rc;
+  g_web_listening = false;
+  if (!g_web_on || !g_listening) {
+    ndp_server_web_close(&g_srv);
+    return;
+  }
+  rc = ndp_server_web_listen(&g_srv, g_ip, AGENT_WEB_PORT);
+  if (rc == 0) {
+    struct in_addr ia;
+    ia.s_addr = g_ip;
+    g_web_listening = true;
+    alog("Web page: http://%s:%u", inet_ntoa(ia), (unsigned)g_srv.web_port);
+  } else {
+    alog("WARN: web page not started (%d: %s)", rc, strerror(-rc));
+  }
 }
 
 static bool ip_usable(in_addr_t ip) { return ip != 0 && ip != (in_addr_t)0xFFFFFFFFu; }
@@ -372,6 +400,7 @@ static bool service_network(uint64_t now) {
         g_ip = ip;
         g_err[0] = '\0';
         alog("Listening on %s:%u", inet_ntoa(ia), (unsigned)g_srv.port);
+        sync_web();
       } else {
         alog("ERROR: listen failed (%d: %s)", rc, strerror(-rc));
         snprintf(g_err, sizeof g_err, "listen failed: %s", strerror(-rc));
@@ -428,6 +457,14 @@ static void draw(uint64_t now) {
   } else {
     printf("IP     : -\nPort   : %u\n", (unsigned)AGENT_PORT);
   }
+  if (g_web_listening) {
+    struct in_addr ia;
+    ia.s_addr = g_ip;
+    printf("Page   : " C_GREEN "http://%s:%u" C_RESET "\n", inet_ntoa(ia), (unsigned)g_srv.web_port);
+    printf("Browser: %s%s\n", g_srv.web_client_fd >= 0 ? C_GREEN "CONNECTED " C_RESET : "not connected", g_srv.web_client_fd >= 0 ? g_srv.web_peer : "");
+  } else {
+    printf("Page   : %s\n\n", g_web_on ? "starting..." : "off (press R to turn on)");
+  }
   if (g_srv.client_fd >= 0) printf("Bridge : " C_GREEN "CONNECTED" C_RESET " %s\n", g_srv.peer);
   else printf("Bridge : not connected\n");
   if (g_srv.agent_cfg.mode == NDP_MODE_READ_ONLY) printf("Mode   : " C_GREEN "READ_ONLY" C_RESET " (no writes)\n");
@@ -463,7 +500,7 @@ static void draw(uint64_t now) {
       printf("\n\n\n");
     }
   }
-  printf("\nA = folders   Y = pair   X = mode\nSELECT x2 = forget pairings   START = Exit\n");
+  printf("\nA = folders   Y = pair   X = mode   R = web page\nSELECT x2 = forget pairings   START = Exit\n");
 
   consoleSelect(&g_bot);
   consoleClear();
@@ -535,6 +572,10 @@ int main(void) {
   plat.log = srv_log;
   plat.keys_changed = keys_changed;
   ndp_server_init(&g_srv, &plat, &cfg);
+  g_web_assets.index_gz = ndp_web_index_gz;
+  g_web_assets.index_gz_len = ndp_web_index_gz_len;
+  g_web_assets.version = ndp_web_version;
+  ndp_server_set_web(&g_srv, &g_web_assets);
 
   {
     struct stat sb;
@@ -587,6 +628,12 @@ int main(void) {
       } else {
         g_forget_armed_until = t + FORGET_CONFIRM_MS;
       }
+      draw_pending = true;
+    }
+    if (!access_ui_active() && (hidKeysDown() & KEY_R)) {
+      g_web_on = !g_web_on;
+      alog("Web page -> %s", g_web_on ? "on" : "off");
+      sync_web();
       draw_pending = true;
     }
     if (!access_ui_active() && (hidKeysDown() & KEY_X)) {

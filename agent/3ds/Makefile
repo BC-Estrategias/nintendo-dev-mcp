@@ -11,9 +11,9 @@ include $(DEVKITARM)/3ds_rules
 
 TARGET      := nintendo-dev-agent
 BUILD       := build
-# platform code + the platform-neutral core + the shared BSD-socket server
-SOURCES     := source ../common/src ../posix/src
-INCLUDES    := source ../common/include ../posix/include
+# platform code + the platform-neutral core + the shared BSD-socket server + the embedded web page
+SOURCES     := source ../common/src ../posix/src ../web
+INCLUDES    := source ../common/include ../posix/include ../web
 
 # The version comes from the single source of truth (shown in the Homebrew Launcher description).
 AGENT_VERSION   := $(shell sed -n 's/^\#define NDP_AGENT_VERSION "\(.*\)"$$/\1/p' $(TOPDIR)/../common/include/ndp/ndp_defs.h)

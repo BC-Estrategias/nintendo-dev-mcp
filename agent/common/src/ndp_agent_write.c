@@ -336,7 +336,7 @@ static int is_a_trash_dir(const ndp_agent *a, const char *norm) {
 
 size_t ndp_agent_rename(ndp_agent *a, const ndp_header *req, const uint8_t *pl, uint8_t *out, size_t cap) {
   const ndp_fs_ops *fs = a->cfg.fs;
-  char from[NDP_PATH_MAX + 1], to[NDP_PATH_MAX + 1], parent[NDP_PATH_MAX + 1], tmp[NDP_PATH_MAX + 16];
+  char from[NDP_PATH_MAX + 1], to[NDP_PATH_MAX + 1], tmp[NDP_PATH_MAX + 16]; /* tmp: the parent folder, then the case-only step's name (3DS: 4 KB stack limit) */
   const char *detail = "";
   const uint8_t *v;
   size_t l;
@@ -368,8 +368,8 @@ size_t ndp_agent_rename(ndp_agent *a, const ndp_header *req, const uint8_t *pl, 
 
   rc = fs->stat(fs->ctx, from, &st);
   if (rc != NDP_OK) return ndp_agent_error(out, cap, req, (uint16_t)rc, rc == NDP_ST_NOT_FOUND ? "no such file or directory" : wdetail(rc), 0);
-  parent_of(to, parent);
-  rc = fs->stat(fs->ctx, parent, &st);
+  parent_of(to, tmp);
+  rc = fs->stat(fs->ctx, tmp, &st);
   if (rc != NDP_OK || !st.is_dir) return ndp_agent_error(out, cap, req, NDP_ST_NOT_FOUND, "destination folder does not exist", 0);
   if (!case_only && fs->stat(fs->ctx, to, &st) == NDP_OK) return ndp_agent_error(out, cap, req, NDP_ST_EXISTS, wdetail(NDP_ST_EXISTS), 0);
 
