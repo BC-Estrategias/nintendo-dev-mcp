@@ -1,7 +1,9 @@
 # Changelog
 
-## 1.4.0 — paired devices management
-- **View and remove paired devices** on the Settings page: a new card lists all devices that have been paired with this console (even if not currently connected), shows which one is the current browser, and includes a button to forget/remove any paired device. Forgotten pairings remain on the console until SELECT×2 is pressed there; this only removes them from this browser's storage.
+## 1.5.0 — paired devices management
+- **View and remove paired devices** on the Settings page: a new card lists every computer or browser paired with the console, even ones not connected right now, and lets you forget any of them from the page. Two protocol commands, `PAIR_LIST` and `PAIR_FORGET` (spec-compatible additions, existing clients unaffected): any authenticated device may list and prune the console's full pairing list, mirroring the trust an opened folder already grants and the SELECT×2 "forget all" already on the console. `ndp_keystore_remove` compacts the on-console key store in place (file format unchanged). Covered by new C unit tests and a TypeScript integration test against the real host agent binary over TCP (pair two devices, list, cross-device forget, revocation on the next connection, self-forget without dropping the live session).
+- Footer with "Desenvolvido por BC Labs" and links to GitHub and Instagram.
+- Fixed a syntax error in the page's Portuguese/English dictionaries (curly quotes used as string delimiters) that left the page blank whenever it was regenerated; `scripts/check.sh` now syntax-checks every page script.
 
 ## 1.3.0 — first release with the web page
 (1.2.0–1.2.2 were test builds that were never published; everything below is new in this release.)

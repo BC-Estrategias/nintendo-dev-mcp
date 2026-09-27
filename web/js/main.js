@@ -167,9 +167,10 @@
     langBtn = h("button.icon-btn.lang", { title: t("language"), onclick: () => { NDP.i18n.setLang(NDP.i18n.lang() === "pt-BR" ? "en" : "pt-BR"); rerender(); }, text: NDP.i18n.lang() === "pt-BR" ? "EN" : "PT" });
     banner = h("div#banner");
     views = { gate: h("section#view-gate"), files: h("section#view-files"), settings: h("section#view-settings"), faq: h("section#view-faq") };
-    fill(app, 
+    fill(app,
       h("header.topbar", null, h("div.brand", null, icon("console"), h("span", { text: t("appName") })), tabsNav, h("span.grow"), statusPill, langBtn),
-      banner, h("main", null, views.gate, views.files, views.settings, views.faq));
+      banner, h("main", null, views.gate, views.files, views.settings, views.faq),
+      h("footer.footer", null, h("p", null, "Desenvolvido por ", h("strong", { text: "BC Labs" }), " · ", h("a", { href: "https://github.com/BC-Estrategias", target: "_blank", text: "GitHub" }), " · ", h("a", { href: "https://instagram.com/bcestrategias", target: "_blank", text: "Instagram" }))));
     NDP.files.mount(views.files);
     NDP.settings.mount(views.settings);
     NDP.faq.mount(views.faq);

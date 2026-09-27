@@ -237,6 +237,19 @@
       if (!this.session) throw new NdpTransportError("AUTH answered without a valid MAC");
     }
 
+    /** Every key currently paired with the console (requires AUTH). */
+    async pairList() {
+      const t = C.parseTlv((await this.request(Command.PAIR_LIST)).payload);
+      return t.all(Tag.PAIR_ENTRY).map((v) => ({ keyId: v.subarray(0, 4), label: C.text(v.subarray(4)) }));
+    }
+
+    /** Removes one paired key from the console by its id (requires AUTH). Any authenticated device may forget
+     * any other: pairing already grants full read/write over the opened folders, and SELECT x2 on the console
+     * already forgets all of them at once. */
+    async forgetPairing(keyId) {
+      await this.request(Command.PAIR_FORGET, C.encodeTlv([[Tag.KEY_ID, keyId]]));
+    }
+
     // ---- information
     async ping() {
       const t0 = performance.now();

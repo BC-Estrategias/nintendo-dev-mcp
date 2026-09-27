@@ -197,6 +197,41 @@ size_t ndp_agent_auth(ndp_agent *a, const ndp_header *req, const uint8_t *pl, ui
   return fail(a, req, out, cap, "unknown key");
 }
 
+/* Lists every key paired with the console (spec: PAIR_LIST). Any already-authenticated device may see the
+ * full list and forget any entry, mirroring the physical trust model: a paired browser already has full
+ * read/write over its opened folders, and the console owner can already wipe every pairing with SELECT x2. */
+size_t ndp_agent_pair_list(ndp_agent *a, const ndp_header *req, uint8_t *out, size_t cap) {
+  ndp_tlv_w w;
+  int i;
+  if (!a->cfg.keys) return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_COMMAND, "no key store", 0);
+  if (cap < NDP_HEADER_SIZE) return 0;
+  ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
+  for (i = 0; i < a->cfg.keys->count; i++) {
+    const ndp_paired_key *k = &a->cfg.keys->keys[i];
+    uint8_t ev[4 + NDP_LABEL_MAX];
+    size_t nl = strlen(k->label);
+    memcpy(ev, k->key_id, 4);
+    memcpy(ev + 4, k->label, nl);
+    ndp_tlv_put(&w, NDP_TAG_PAIR_ENTRY, ev, 4 + nl);
+  }
+  return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
+}
+
+size_t ndp_agent_pair_forget(ndp_agent *a, const ndp_header *req, const uint8_t *pl, uint8_t *out, size_t cap) {
+  const uint8_t *kid;
+  size_t lk;
+  ndp_tlv_w w;
+  if (!ndp_tlv_find(pl, req->payload_len, NDP_TAG_KEY_ID, &kid, &lk) || lk != 4)
+    return ndp_agent_error(out, cap, req, NDP_ST_BAD_REQUEST, "key_id required", 0);
+  if (!a->cfg.keys) return ndp_agent_error(out, cap, req, NDP_ST_UNSUPPORTED_COMMAND, "no key store", 0);
+  if (ndp_keystore_remove(a->cfg.keys, kid) != 0)
+    return ndp_agent_error(out, cap, req, NDP_ST_NOT_FOUND, "no such pairing", 0);
+  if (a->cfg.keys_changed) a->cfg.keys_changed(a->cfg.keys_ctx, a->cfg.keys);
+  if (cap < NDP_HEADER_SIZE) return 0;
+  ndp_tlv_w_init(&w, out + NDP_HEADER_SIZE, cap - NDP_HEADER_SIZE);
+  return ndp_agent_finish(out, cap, req, NDP_KIND_RES, NDP_OK, &w);
+}
+
 size_t ndp_agent_seal(ndp_agent *a, uint8_t *frame, size_t len, size_t cap) {
   if (len < NDP_HEADER_SIZE || len + NDP_MAC_SIZE > cap) return 0;
   frame[6] |= (uint8_t)NDP_FLAG_MAC; /* flags are little-endian at offset 6 */

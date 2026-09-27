@@ -31,6 +31,8 @@ export const Command = {
   PAIR_BEGIN: 0x0006,
   PAIR_REVEAL: 0x0007,
   PAIR_POLL: 0x0008,
+  PAIR_LIST: 0x0009,
+  PAIR_FORGET: 0x000a,
 } as const;
 
 export const FsType = { FILE: 1, DIR: 2 } as const;
@@ -127,6 +129,7 @@ export const Tag = {
   PAIR_PUB: 0x0061,
   PAIR_NONCE: 0x0062,
   PAIR_STATE: 0x0063,
+  PAIR_ENTRY: 0x0064,
 } as const;
 
 export type Mode = "READ_ONLY" | "DEVELOPMENT" | "FULL";

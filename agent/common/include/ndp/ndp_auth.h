@@ -75,6 +75,8 @@ int ndp_keystore_add(ndp_keystore *ks, const uint8_t psk[32], const char *label)
  * the oldest; -1 when nothing is replaced. The console tells the person before they press A. */
 int ndp_keystore_replace_target(const ndp_keystore *ks, const char *label);
 void ndp_keystore_clear(ndp_keystore *ks);
+/* Removes the key with this key_id, compacting the array (order of the rest is preserved). Returns 0, or -1 when not found. */
+int ndp_keystore_remove(ndp_keystore *ks, const uint8_t key_id[4]);
 
 /* File format: "NDPK" version(1) count(1) rsvd(2) device_id[16] count x {key_id[4] psk[32] label[16]} sha256(all before)[32]. */
 #define NDP_KEYSTORE_MAX_BYTES (24 + NDP_MAX_KEYS * 52 + 32)

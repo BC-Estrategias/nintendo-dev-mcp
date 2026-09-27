@@ -106,6 +106,18 @@ int ndp_keystore_add(ndp_keystore *ks, const uint8_t psk[32], const char *label)
   return NDP_OK;
 }
 
+int ndp_keystore_remove(ndp_keystore *ks, const uint8_t key_id[4]) {
+  int i;
+  for (i = 0; i < ks->count; i++) {
+    if (memcmp(ks->keys[i].key_id, key_id, 4) != 0) continue;
+    if (i + 1 < ks->count) memmove(&ks->keys[i], &ks->keys[i + 1], (size_t)(ks->count - i - 1) * sizeof ks->keys[0]);
+    ks->count--;
+    memset(&ks->keys[ks->count], 0, sizeof ks->keys[0]);
+    return 0;
+  }
+  return -1;
+}
+
 size_t ndp_keystore_serialize(const ndp_keystore *ks, uint8_t *out, size_t cap) {
   size_t n = 24 + (size_t)ks->count * 52 + 32, o = 0;
   int i;

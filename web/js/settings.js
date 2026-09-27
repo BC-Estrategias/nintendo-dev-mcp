@@ -3,10 +3,40 @@
 (function () {
   "use strict";
   const NDP = (globalThis.NDP = globalThis.NDP || {});
-  const { h, fill, icon, confirmBox } = NDP.ui;
-  const U = NDP.util, S = NDP.session;
+  const { h, fill, icon, confirmBox, toast } = NDP.ui;
+  const U = NDP.util, S = NDP.session, C = NDP.codec, A = NDP.auth;
   const t = (...a) => NDP.i18n.t(...a);
   let root;
+  let pairedKeys = null, pairedKeysError = null, pairedKeysLoading = false;
+
+  function errText(e) {
+    if (!e) return "";
+    if (e.statusName) return NDP.i18n.has("err." + e.statusName) ? t("err." + e.statusName) : e.statusName;
+    return e.message || String(e);
+  }
+
+  /** The key_id of this browser's own stored pairing for the current console, as a hex string (or null). */
+  function myKeyIdHex() {
+    const mine = S.deviceHex && S.store.read()[S.deviceHex];
+    if (!mine) return null;
+    try { return C.hex(A.keyIdOf(C.fromHex(mine.psk))); } catch (_) { return null; }
+  }
+
+  async function loadPairedKeys() {
+    if (S.state !== "ready" || pairedKeysLoading) return;
+    pairedKeysLoading = true;
+    try {
+      const list = await S.run((c) => c.pairList(), { retry: true });
+      pairedKeys = list.map((k) => ({ hex: C.hex(k.keyId), label: k.label }));
+      pairedKeysError = null;
+    } catch (e) {
+      pairedKeys = null;
+      pairedKeysError = errText(e);
+    } finally {
+      pairedKeysLoading = false;
+      render();
+    }
+  }
 
   const LEVEL = { write: "levelWrite", read: "levelRead" };
 
@@ -36,23 +66,29 @@
       list.length ? h("ul", null, list.map((p) => h("li", null, h("code", { text: p }), h("button.link", { onclick: () => { NDP.main.show("files"); NDP.files.go(p); }, text: t("open") })))) : h("p.muted", { text: t(kind === "write" ? "noWriteFolders" : "noReadFolders") }));
   }
 
-  function pairedDevicesList(title, devices, currentDeviceHex) {
-    return h("div.paired-devices", null, h("h4", { text: title }),
-      devices.length ? h("ul", null, devices.map(({ hex, label, at, isCurrent }) =>
-        h("li.device-item", null,
-          h("div.device-info", null,
-            h("span.device-label", { text: label || "(unnamed)" }),
-            isCurrent ? h("span.pill.ok", { text: t("currentDevice") }) : null,
-            h("span.muted.small", { text: at ? new Date(at).toLocaleDateString() : "—" })),
-          h("button.link.danger", {
-            onclick: async () => {
-              if (await confirmBox(t("forgetDevice"), t("forgetDeviceBody", label || "(unnamed)"), t("forget"), true)) {
-                S.store.forget(hex);
-                render();
-              }
-            },
-            text: t("remove")
-          })))) : h("p.muted", { text: t("noPairedDevices") }));
+  function pairedDevicesList() {
+    if (pairedKeysError) return h("p.muted", { text: pairedKeysError });
+    if (!pairedKeys) return h("p.muted", { text: t("loading") });
+    const mine = myKeyIdHex();
+    return pairedKeys.length ? h("ul", null, pairedKeys.map(({ hex, label }) => {
+      const isCurrent = hex === mine;
+      return h("li.device-item", null,
+        h("div.device-info", null,
+          h("span.device-label", { text: label || "(unnamed)" }),
+          isCurrent ? h("span.pill.ok", { text: t("currentDevice") }) : null),
+        h("button.link.danger", {
+          onclick: async () => {
+            if (await confirmBox(t("forgetDevice"), t("forgetDeviceBody", label || "(unnamed)"), t("forget"), true)) {
+              try {
+                await S.run((c) => c.forgetPairing(C.fromHex(hex)));
+                if (isCurrent) S.store.forget(S.deviceHex);
+                await loadPairedKeys();
+              } catch (e) { toast(errText(e), "error", 6000); }
+            }
+          },
+          text: t("remove")
+        }));
+    })) : h("p.muted", { text: t("noPairedDevices") });
   }
 
   function render() {
@@ -92,15 +128,10 @@
       h("div.actions", null,
         paired ? h("button.danger", { onclick: async () => { if (await confirmBox(t("forgetThis"), t("forgetThisBody"), t("forgetThis"), true)) { await S.forgetThisBrowser(); NDP.main.show("files"); } } }, icon("trash"), t("forgetThis")) : null));
 
-    const allPairings = S.store.read();
-    const pairedDevices = Object.entries(allPairings).map(([hex, entry]) => ({
-      hex,
-      label: entry.label,
-      at: entry.at,
-      isCurrent: hex === S.deviceHex
-    })).sort((a, b) => (b.at || 0) - (a.at || 0));
-
-    const pairedDevicesCard = pairedDevices.length > 0 ? card(t("pairedDevices"), pairedDevicesList(t("allPairedDevices"), pairedDevices, S.deviceHex)) : null;
+    const pairedDevicesCard = ready && info.auth === "required"
+      ? card(t("pairedDevices"), h("p.muted.small", { text: t("allPairedDevicesNote") }), pairedDevicesList())
+      : null;
+    if (ready && info.auth === "required" && pairedKeys === null && !pairedKeysError && !pairedKeysLoading) loadPairedKeys();
 
     const prefs = card(t("preferences"),
       pref(t("language"), null, h("select", { onchange: (e) => { NDP.i18n.setLang(e.target.value); NDP.main.rerender(); } }, [["auto", t("langAuto")], ["pt-BR", "Português (Brasil)"], ["en", "English"]].map(([v, l]) => h("option", { value: v, text: l, selected: NDP.i18n.choice() === v })))),
@@ -115,7 +146,10 @@
 
   function mount(el) {
     root = el;
-    S.on("state", () => { if (root.offsetParent) render(); });
+    S.on("state", (state) => {
+      if (state !== "ready") { pairedKeys = null; pairedKeysError = null; } // a new connection may be a different console
+      if (root.offsetParent) render();
+    });
     S.on("context", () => { if (root.offsetParent) render(); });
     S.on("ping", () => { if (root.offsetParent) render(); });
     render();

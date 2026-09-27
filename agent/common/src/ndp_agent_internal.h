@@ -34,6 +34,9 @@ void ndp_agent_upload_abort(ndp_agent *a, int discard);
 /* Pairing / authentication (ndp_agent_auth.c). */
 size_t ndp_agent_pair(ndp_agent *a, const ndp_header *req, const uint8_t *payload, uint8_t *out, size_t cap);
 size_t ndp_agent_auth(ndp_agent *a, const ndp_header *req, const uint8_t *payload, uint8_t *out, size_t cap);
+/* PAIR_LIST / PAIR_FORGET: manage the console's paired-key list (require cfg.keys; auth already required by handle_inner). */
+size_t ndp_agent_pair_list(ndp_agent *a, const ndp_header *req, uint8_t *out, size_t cap);
+size_t ndp_agent_pair_forget(ndp_agent *a, const ndp_header *req, const uint8_t *payload, uint8_t *out, size_t cap);
 /* Appends the HELLO fields that only exist with auth "required" (device id, paired keys, pairing window). */
 void ndp_agent_hello_auth_fields(ndp_agent *a, ndp_tlv_w *w);
 /* Seals a response frame in place (sets the MAC flag, appends the MAC). Returns the new length, 0 if it does not fit. */

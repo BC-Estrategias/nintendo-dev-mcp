@@ -244,6 +244,63 @@ suite("pairing over TCP", () => {
     assert.equal(toHex(ida), toHex(idb));
   });
 
+  test("PAIR_LIST lists every paired key (not just the caller's own); PAIR_FORGET removes just one", async () => {
+    // The agent serves one raw NDP connection at a time (a second connect replaces the first, spec §15-adjacent
+    // behavior also seen on the web socket), so this drives everything through a single connection, "b" --
+    // exactly how a real browser only ever has one live session, yet PAIR_LIST must still show every OTHER
+    // device paired with the console, not just the caller's own.
+    await start();
+    { // pair "Chrome Mac" and drop the connection before restarting for a second pairing window
+      const tmp = await NdpClient.connect(opts());
+      await tmp.hello();
+      await tmp.pair(code, "Chrome Mac");
+      tmp.close();
+    }
+    // a second pairing, in a fresh window after a restart; the key file (fresh: false) carries the first key over
+    const code2 = randomBytes(10);
+    const CODE2 = codeEncode(code2);
+    const psk2 = derivePsk(code2);
+    await start({ fresh: false, pairCode: CODE2 });
+    const b = await NdpClient.connect(opts());
+    await b.hello();
+    await b.pair(code2, "Firefox PC");
+    await b.authenticate(psk2);
+
+    const listed = await b.pairList();
+    assert.equal(listed.length, 2, "both pairings are visible, not just the caller's own (Firefox PC)");
+    const byLabel = new Map(listed.map((k) => [k.label, k.keyId]));
+    assert.equal(toHex(byLabel.get("Chrome Mac")!), toHex(keyIdOf(psk)));
+    assert.equal(toHex(byLabel.get("Firefox PC")!), toHex(keyIdOf(psk2)));
+
+    await assert.rejects(
+      b.forgetPairing(new Uint8Array(4)),
+      (e) => e instanceof NdpRemoteError && e.status === Status.NOT_FOUND,
+      "forgetting an unknown key_id fails and touches nothing",
+    );
+    assert.equal((await b.pairList()).length, 2);
+
+    // b forgets Chrome Mac -- an authenticated device can remove a pairing that is not its own
+    await b.forgetPairing(keyIdOf(psk));
+    const afterFirst = await b.pairList();
+    assert.equal(afterFirst.length, 1);
+    assert.equal(afterFirst[0]!.label, "Firefox PC");
+
+    // b now forgets its OWN key; its already-sealed live session keeps working (matches SELECT x2 today:
+    // forgetting a pairing never kills a connection already using it)
+    await b.forgetPairing(keyIdOf(psk2));
+    assert.equal((await b.stat("/hello.txt")).type, "file", "the live session that just forgot itself keeps working");
+    b.close();
+
+    // but a FRESH connection can no longer authenticate with either forgotten key
+    const retry = await NdpClient.connect(opts());
+    try {
+      await retry.hello();
+      await assert.rejects(retry.authenticate(psk2), (e) => e instanceof NdpRemoteError && e.status === Status.UNAUTHORIZED);
+    } finally {
+      retry.close();
+    }
+  });
+
   test("a corrupted key file is ignored (fail closed: no pairings), not trusted", async () => {
     await start();
     (await pairedClient()).close();

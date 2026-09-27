@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define NDP_AGENT_VERSION "1.3.0"
+#define NDP_AGENT_VERSION "1.5.0"
 #define NDP_PROTOCOL_VERSION 1
 #define NDP_HEADER_SIZE 20
 #define NDP_MAC_SIZE 16
@@ -32,6 +32,8 @@ enum ndp_command {
   NDP_CMD_PAIR_BEGIN = 0x0006,
   NDP_CMD_PAIR_REVEAL = 0x0007,
   NDP_CMD_PAIR_POLL = 0x0008,
+  NDP_CMD_PAIR_LIST = 0x0009,
+  NDP_CMD_PAIR_FORGET = 0x000A,
   NDP_CMD_AUTH = 0x0005,
   NDP_CMD_DEVICE_INFO = 0x0010,
   NDP_CMD_ACCESS_INFO = 0x0011,
@@ -136,7 +138,8 @@ enum ndp_tag {
   NDP_TAG_PAIR_COMMIT = 0x0060,
   NDP_TAG_PAIR_PUB = 0x0061,
   NDP_TAG_PAIR_NONCE = 0x0062,
-  NDP_TAG_PAIR_STATE = 0x0063
+  NDP_TAG_PAIR_STATE = 0x0063,
+  NDP_TAG_PAIR_ENTRY = 0x0064 /* PAIR_LIST response, one per paired key: key_id(4) || label (UTF-8, no NUL) */
 };
 
 /* Entries a filtered (traversal) FS_LIST reads per response, shown or not. */

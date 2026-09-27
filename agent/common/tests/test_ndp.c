@@ -372,6 +372,146 @@ static void test_keystore(void) {
   ndp_keystore_clear(&ks);
   n = ndp_keystore_serialize(&ks, buf, sizeof buf);
   CHECK(n == 24 + 32 && ndp_keystore_parse(&back, buf, n) == 0 && back.count == 0, "empty store round trip");
+  { /* remove: compacts, keeps the rest in order, untouched on a miss */
+    ndp_keystore r;
+    uint8_t missing[4] = { 0xff, 0xff, 0xff, 0xff };
+    ndp_keystore_clear(&r);
+    for (j = 0; j < 3; j++) {
+      char lab[8];
+      memset(psk, j + 1, 32);
+      snprintf(lab, sizeof lab, "pc%d", j);
+      ndp_keystore_add(&r, psk, lab);
+    }
+    CHECK(ndp_keystore_remove(&r, missing) == -1 && r.count == 3, "removing an unknown key_id fails and changes nothing");
+    CHECK(ndp_keystore_remove(&r, r.keys[1].key_id) == 0 && r.count == 2 && strcmp(r.keys[0].label, "pc0") == 0 &&
+              strcmp(r.keys[1].label, "pc2") == 0,
+          "removing the middle key compacts, keeping the others in order");
+    CHECK(ndp_keystore_remove(&r, r.keys[1].key_id) == 0 && r.count == 1 && strcmp(r.keys[0].label, "pc0") == 0, "remove the last remaining match");
+    CHECK(ndp_keystore_remove(&r, r.keys[0].key_id) == 0 && r.count == 0, "remove the only key: store is empty");
+    CHECK(ndp_keystore_remove(&r, missing) == -1, "removing from an empty store fails");
+  }
+}
+
+/* Walks a validated TLV payload collecting every occurrence of `tag` (ndp_tlv_find only returns the first). */
+static int collect_tag(const uint8_t *p, size_t len, uint16_t tag, const uint8_t **vals, size_t *lens, int max) {
+  size_t o = 0;
+  int n = 0;
+  while (o + 4 <= len && n < max) {
+    uint16_t t = (uint16_t)(p[o] | (p[o + 1] << 8));
+    uint16_t l = (uint16_t)(p[o + 2] | (p[o + 3] << 8));
+    if (t == tag) { vals[n] = p + o + 4; lens[n] = l; n++; }
+    o += 4 + l;
+  }
+  return n;
+}
+
+/* PAIR_LIST / PAIR_FORGET, exercised through the real dispatcher (ndp_agent_handle), the same entry point the
+ * server uses. With auth "none" (sec.required = 0) the generic authenticated-only gate in handle_inner is
+ * skipped, reaching the new commands directly; that gate itself is generic code shared by every authenticated
+ * command and is exercised for "required" below and, for other commands, by test_auth_dialogues. */
+static void test_pair_management(void) {
+  ndp_keystore ks;
+  ndp_agent_config cfg;
+  ndp_agent a;
+  ndp_header req, rh;
+  uint8_t out[512], psk_a[32], psk_b[32], id_a[4], id_b[4], pl[16];
+  size_t n;
+
+  memset(&ks, 0, sizeof ks);
+  memset(psk_a, 0xAA, 32);
+  memset(psk_b, 0xBB, 32);
+  ndp_keystore_add(&ks, psk_a, "Chrome Mac");
+  ndp_keystore_add(&ks, psk_b, "Firefox PC");
+  ndp_key_id(psk_a, id_a);
+  ndp_key_id(psk_b, id_b);
+
+  memset(&cfg, 0, sizeof cfg);
+  cfg.platform = "test"; cfg.agent_version = "t"; cfg.auth = "none"; cfg.max_frame = 65536;
+  cfg.keys = &ks;
+  ndp_agent_init(&a, &cfg);
+  a.hello_done = 1; /* skip a real HELLO round trip: irrelevant to this command's own logic */
+
+  memset(&req, 0, sizeof req);
+  req.version = 1; req.kind = NDP_KIND_REQ; req.request_id = 1; req.command = NDP_CMD_PAIR_LIST;
+
+  n = ndp_agent_handle(&a, &req, NULL, out, sizeof out);
+  CHECK(n >= NDP_HEADER_SIZE && ndp_header_decode(out, &rh) == NDP_OK && rh.status == NDP_OK, "pair_list responds OK");
+  {
+    const uint8_t *vals[4]; size_t lens[4];
+    int found_a = 0, found_b = 0, i;
+    int cnt = collect_tag(out + NDP_HEADER_SIZE, rh.payload_len, NDP_TAG_PAIR_ENTRY, vals, lens, 4);
+    CHECK(cnt == 2, "two paired keys listed, got %d", cnt);
+    for (i = 0; i < cnt; i++) {
+      if (lens[i] == 4 + 10 && memcmp(vals[i], id_a, 4) == 0 && memcmp(vals[i] + 4, "Chrome Mac", 10) == 0) found_a = 1;
+      if (lens[i] == 4 + 10 && memcmp(vals[i], id_b, 4) == 0 && memcmp(vals[i] + 4, "Firefox PC", 10) == 0) found_b = 1;
+    }
+    CHECK(found_a && found_b, "both entries carry the right key_id and label");
+  }
+
+  { /* forgetting an unknown key_id fails, and changes nothing */
+    uint8_t missing[4] = { 0xff, 0xff, 0xff, 0xff };
+    ndp_tlv_w w;
+    req.command = NDP_CMD_PAIR_FORGET;
+    ndp_tlv_w_init(&w, pl, sizeof pl);
+    ndp_tlv_put(&w, NDP_TAG_KEY_ID, missing, 4);
+    req.payload_len = (uint32_t)w.len;
+    n = ndp_agent_handle(&a, &req, pl, out, sizeof out);
+    CHECK(n >= NDP_HEADER_SIZE && ndp_header_decode(out, &rh) == NDP_OK && rh.status == NDP_ST_NOT_FOUND && ks.count == 2,
+          "forgetting an unknown key_id is NOT_FOUND and changes nothing");
+  }
+  { /* a request with no key_id is BAD_REQUEST */
+    req.payload_len = 0;
+    n = ndp_agent_handle(&a, &req, pl, out, sizeof out);
+    CHECK(n >= NDP_HEADER_SIZE && ndp_header_decode(out, &rh) == NDP_OK && rh.status == NDP_ST_BAD_REQUEST, "missing key_id is BAD_REQUEST");
+  }
+  { /* forgetting a real key_id removes just that one; the other survives */
+    ndp_tlv_w w;
+    ndp_tlv_w_init(&w, pl, sizeof pl);
+    ndp_tlv_put(&w, NDP_TAG_KEY_ID, id_a, 4);
+    req.payload_len = (uint32_t)w.len;
+    n = ndp_agent_handle(&a, &req, pl, out, sizeof out);
+    CHECK(n >= NDP_HEADER_SIZE && ndp_header_decode(out, &rh) == NDP_OK && rh.status == NDP_OK, "forget responds OK");
+    CHECK(ks.count == 1 && strcmp(ks.keys[0].label, "Firefox PC") == 0, "only the targeted key is gone");
+    req.command = NDP_CMD_PAIR_LIST;
+    req.payload_len = 0;
+    n = ndp_agent_handle(&a, &req, NULL, out, sizeof out);
+    ndp_header_decode(out, &rh);
+    { const uint8_t *vals[4]; size_t lens[4];
+      int cnt = collect_tag(out + NDP_HEADER_SIZE, rh.payload_len, NDP_TAG_PAIR_ENTRY, vals, lens, 4);
+      CHECK(cnt == 1 && lens[0] == 4 + 10 && memcmp(vals[0] + 4, "Firefox PC", 10) == 0, "pair_list now shows only the survivor"); }
+  }
+  { /* no key store configured: both commands report unsupported rather than crashing */
+    ndp_agent a2;
+    ndp_agent_config cfg2 = cfg;
+    cfg2.keys = NULL;
+    ndp_agent_init(&a2, &cfg2);
+    a2.hello_done = 1;
+    req.command = NDP_CMD_PAIR_LIST;
+    req.payload_len = 0;
+    n = ndp_agent_handle(&a2, &req, NULL, out, sizeof out);
+    CHECK(n >= NDP_HEADER_SIZE && ndp_header_decode(out, &rh) == NDP_OK && rh.status == NDP_ST_UNSUPPORTED_COMMAND, "pair_list without a key store");
+    req.command = NDP_CMD_PAIR_FORGET;
+    { ndp_tlv_w w; ndp_tlv_w_init(&w, pl, sizeof pl); ndp_tlv_put(&w, NDP_TAG_KEY_ID, id_a, 4); req.payload_len = (uint32_t)w.len; }
+    n = ndp_agent_handle(&a2, &req, pl, out, sizeof out);
+    CHECK(n >= NDP_HEADER_SIZE && ndp_header_decode(out, &rh) == NDP_OK && rh.status == NDP_ST_UNSUPPORTED_COMMAND, "pair_forget without a key store");
+  }
+  { /* gated: with auth required, before AUTH, both are refused (the shared gate, exercised for these commands too) */
+    ndp_agent a3;
+    ndp_pairing pw3;
+    ndp_agent_config cfg3 = cfg;
+    cfg3.auth = "required";
+    memset(&pw3, 0, sizeof pw3);
+    cfg3.pairing = &pw3;
+    ndp_agent_init(&a3, &cfg3);
+    a3.hello_done = 1; /* HELLO already exchanged; AUTH was not */
+    req.command = NDP_CMD_PAIR_LIST;
+    req.payload_len = 0;
+    n = ndp_agent_handle(&a3, &req, NULL, out, sizeof out);
+    CHECK(n >= NDP_HEADER_SIZE && ndp_header_decode(out, &rh) == NDP_OK && rh.status == NDP_ST_UNAUTHORIZED, "PAIR_LIST before AUTH is refused");
+    req.command = NDP_CMD_PAIR_FORGET;
+    n = ndp_agent_handle(&a3, &req, NULL, out, sizeof out);
+    CHECK(n >= NDP_HEADER_SIZE && ndp_header_decode(out, &rh) == NDP_OK && rh.status == NDP_ST_UNAUTHORIZED, "PAIR_FORGET before AUTH is refused");
+  }
 }
 
 static int fail_rng(void *ctx, uint8_t *out, size_t n) { (void)ctx; memset(out, 0, n); return -1; }
@@ -862,6 +1002,7 @@ int main(void) {
   test_dialogues();
   test_auth_primitives();
   test_keystore();
+  test_pair_management();
   test_auth_dialogues();
   test_web();
   test_pair2();

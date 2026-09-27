@@ -177,6 +177,8 @@ static size_t handle_inner(ndp_agent *a, const ndp_header *req, const uint8_t *p
   if (req->command == NDP_CMD_PING) return do_ping(req, payload, out, cap);
   if (req->command == NDP_CMD_ACCESS_INFO) return do_access_info(a, req, out, cap);
   if (req->command == NDP_CMD_DEVICE_INFO) return do_device_info(a, req, out, cap);
+  if (req->command == NDP_CMD_PAIR_LIST) return ndp_agent_pair_list(a, req, out, cap);
+  if (req->command == NDP_CMD_PAIR_FORGET) return ndp_agent_pair_forget(a, req, payload, out, cap);
   if (a->cfg.fs && (req->command == NDP_CMD_FS_LIST || req->command == NDP_CMD_FS_STAT ||
                     req->command == NDP_CMD_FS_READ))
     return ndp_agent_fs_handle(a, req, payload, out, cap);

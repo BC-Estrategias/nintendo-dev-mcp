@@ -554,6 +554,21 @@ export class NdpClient {
     if (!this.#session) throw new NdpProtocolError(Status.UNAUTHORIZED, "AUTH answered without a valid MAC");
   }
 
+  /** Every key currently paired with the console (requires AUTH). */
+  async pairList(): Promise<Array<{ keyId: Uint8Array; label: string }>> {
+    const res = await this.request(Command.PAIR_LIST);
+    return parseTlv(res.payload)
+      .all(Tag.PAIR_ENTRY)
+      .map((v) => ({ keyId: v.subarray(0, 4), label: new TextDecoder().decode(v.subarray(4)) }));
+  }
+
+  /** Removes one paired key from the console by its id (requires AUTH). Any authenticated key may forget any other:
+   * pairing already grants full read/write over the opened folders, and SELECT x2 on the console already forgets all. */
+  async forgetPairing(keyId: Uint8Array): Promise<void> {
+    if (keyId.length !== 4) throw new RangeError("keyId must be 4 bytes");
+    await this.request(Command.PAIR_FORGET, encodeTlv([[Tag.KEY_ID, keyId]]));
+  }
+
   async stat(path: string): Promise<FsStat> {
     const res = await this.request(Command.FS_STAT, encodeTlv([[Tag.PATH, str(normalizePath(path))]]));
     const t = parseTlv(res.payload);

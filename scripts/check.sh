@@ -13,6 +13,9 @@ if [ -d .git ] && ! git diff --quiet -- docs/protocol/test-vectors agent/common/
   exit 1
 fi
 
+echo "==> web page scripts parse?"
+for f in web/js/*.js; do node --check "$f"; done
+
 echo "==> web page up to date?"
 python3 scripts/build-web.py --check
 
