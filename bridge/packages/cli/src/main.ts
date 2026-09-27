@@ -164,7 +164,7 @@ async function main(argv: string[]): Promise<number> {
   if (cmd === "find") {
     const found = await discover(target ? { port: Number(target) } : {});
     if (found.length === 0) {
-      console.error("no agent found. Open the Nintendo Dev Agent app on the console (same Wi-Fi as this computer).");
+      console.error("no agent found. Open the NSD Bridge app on the console (same Wi-Fi as this computer).");
       return 1;
     }
     for (const f of found) console.log(`${f.host}:${f.port}  ${f.agent.platform} agent v${f.agent.agentVersion}  mode ${f.agent.mode}`);

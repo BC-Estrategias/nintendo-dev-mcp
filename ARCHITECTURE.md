@@ -1,4 +1,4 @@
-# Nintendo Dev MCP — Arquitetura (rascunho v0.1)
+# NSD Bridge — Arquitetura (rascunho v0.1)
 
 Status: **proposta para revisão**. Nenhum código de produto escrito ainda. Fatos citados aqui estão verificados (ou marcados como hipótese) em [`docs/research/findings.md`](docs/research/findings.md).
 

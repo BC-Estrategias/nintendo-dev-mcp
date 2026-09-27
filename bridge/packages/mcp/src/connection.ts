@@ -100,7 +100,7 @@ export class DeviceConnection {
     const found = await discover({ port: this.port });
     if (found.length === 0)
       throw new DeviceNotFoundError(
-        `no Nintendo Dev agent found on this network (port ${this.port}). Open the "Nintendo Dev Agent" app on the console (same Wi-Fi as this computer) or set the host explicitly.`,
+        `no NSD Bridge found on this network (port ${this.port}). Open the "NSD Bridge" app on the console (same Wi-Fi as this computer) or set the host explicitly.`,
       );
     if (found.length > 1)
       throw new DeviceNotFoundError(`several agents found (${found.map((f) => f.host).join(", ")}); set the host explicitly.`);

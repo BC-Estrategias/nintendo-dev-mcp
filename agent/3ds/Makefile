@@ -1,4 +1,4 @@
-# Nintendo Dev Agent — 3DS build (devkitPro). Produces nintendo-dev-agent.3dsx + .smdh
+# NSD Bridge — 3DS build (devkitPro). Produces nintendo-dev-agent.3dsx + .smdh
 # Build:  export DEVKITPRO=/opt/devkitpro DEVKITARM=/opt/devkitpro/devkitARM && make
 .SUFFIXES:
 
@@ -17,7 +17,7 @@ INCLUDES    := source ../common/include ../posix/include ../web
 
 # The version comes from the single source of truth (shown in the Homebrew Launcher description).
 AGENT_VERSION   := $(shell sed -n 's/^\#define NDP_AGENT_VERSION "\(.*\)"$$/\1/p' $(TOPDIR)/../common/include/ndp/ndp_defs.h)
-APP_TITLE       := Nintendo Dev Agent
+APP_TITLE       := NSD Bridge
 APP_DESCRIPTION := v$(AGENT_VERSION) - remote dev agent
 APP_AUTHOR      := BC Estrategias
 ICON            := icon.png

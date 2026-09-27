@@ -173,7 +173,7 @@ suite("the console web page (HTTP + WebSocket)", () => {
     assert.equal(r.headers.get("content-encoding"), "gzip");
     assert.match(r.headers.get("content-type") ?? "", /text\/html/);
     assert.equal(Number(r.headers.get("content-length")), r.body.length);
-    assert.match(gunzipSync(r.body).toString(), /<title>Nintendo Dev Agent<\/title>/);
+    assert.match(gunzipSync(r.body).toString(), /<title>NSD Bridge<\/title>/);
     const csp = r.headers.get("content-security-policy") ?? "";
     assert.match(csp, /default-src 'none'/);
     assert.match(csp, /frame-ancestors 'none'/);

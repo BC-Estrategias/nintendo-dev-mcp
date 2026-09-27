@@ -1,4 +1,4 @@
-/* Nintendo Dev Agent — 3DS entry point.
+/* NSD Bridge — 3DS entry point.
  * Wi-Fi/soc bring-up, the UI, and the main loop. Protocol handling and connection management live in
  * the shared code (agent/common, agent/posix). Network start-up follows the sequence proven by ftpd:
  * acInit -> ACU_GetWifiStatus -> memalign(0x1000, 1 MiB) -> socInit -> NDM exclusive+lock. */
@@ -455,7 +455,7 @@ static void draw(uint64_t now) {
 
   consoleSelect(&g_top);
   consoleClear();
-  printf(C_CYAN "Nintendo Dev Agent" C_RESET "   v%s\n", NDP_AGENT_VERSION);
+  printf(C_CYAN "NSD Bridge" C_RESET "   v%s\n", NDP_AGENT_VERSION);
   printf("Protocol %d\n\n", NDP_PROTOCOL_VERSION);
   printf("Status : %s%s" C_RESET "\n", color, status);
   if (g_listening) {
@@ -551,7 +551,7 @@ int main(void) {
   alog_init();
   g_start_ms = now_ms(NULL);
 
-  alog("Nintendo Dev Agent v%s, protocol %d", NDP_AGENT_VERSION, NDP_PROTOCOL_VERSION);
+  alog("NSD Bridge v%s, protocol %d", NDP_AGENT_VERSION, NDP_PROTOCOL_VERSION);
   if (R_SUCCEEDED(APT_CheckNew3DS(&is_new3ds))) alog("Console: %s", is_new3ds ? "New 3DS family" : "Old 3DS family");
   r = acInit();
   alog("acInit: 0x%08lX", (unsigned long)r);

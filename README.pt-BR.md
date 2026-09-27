@@ -1,4 +1,4 @@
-# Nintendo Dev MCP (pt-BR)
+# NSD Bridge (pt-BR)
 
 [English README](README.md)
 

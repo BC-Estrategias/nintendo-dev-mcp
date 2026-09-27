@@ -1,8 +1,8 @@
-# CIA description of the Nintendo Dev Agent (built by scripts/build-3ds-cia.sh).
+# CIA description of NSD Bridge (built by scripts/build-3ds-cia.sh).
 # Modelled on a known-working homebrew CIA (libctru app with sockets and SD access).
 BasicInfo:
-  Title: "Nintendo Dev Agent"
-  ProductCode: "CTR-P-NDEV"
+  Title: "NSD Bridge"
+  ProductCode: "CTR-P-NSDB"
   Logo: Homebrew
 
 TitleInfo:

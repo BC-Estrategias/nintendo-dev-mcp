@@ -54,7 +54,7 @@ export function describeError(e: unknown, host: string | null): string {
   }
   if (e instanceof DeviceNotFoundError) return e.message;
   if (e instanceof NdpTransportError)
-    return `Cannot talk to the console${host ? ` at ${host}` : ""}: ${e.message}. Make sure the "Nintendo Dev Agent" app is open on the 3DS and on the same Wi-Fi; if its IP changed use nintendo_find_device. For a write/delete the outcome may be unknown: verify with nintendo_fs_stat before retrying.`;
+    return `Cannot talk to the console${host ? ` at ${host}` : ""}: ${e.message}. Make sure the "NSD Bridge" app is open on the 3DS and on the same Wi-Fi; if its IP changed use nintendo_find_device. For a write/delete the outcome may be unknown: verify with nintendo_fs_stat before retrying.`;
   if (e instanceof PathInvalidError) return `${e.message}. Device paths must be absolute (e.g. /3ds/nintendo-dev-agent/notes.txt).`;
   if (e instanceof LocalPathError) return e.message;
   return e instanceof Error ? e.message : String(e);
@@ -105,13 +105,13 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
 
   tool("nintendo_find_device", {
     title: "Find the Nintendo 3DS on the network",
-    description: `Scans the local network for a console running the "Nintendo Dev Agent" app and returns its address and agent info. The console's IP changes (DHCP), so use this when other tools cannot connect. ${HARDWARE} The scan only touches port 6464 of this computer's own subnets.`,
+    description: `Scans the local network for a console running the "NSD Bridge" app and returns its address and agent info. The console's IP changes (DHCP), so use this when other tools cannot connect. ${HARDWARE} The scan only touches port 6464 of this computer's own subnets.`,
     inputSchema: z.object({ hosts: z.array(z.string()).max(8).optional().describe('Optional hosts or "a.b.c.0/24" ranges to scan instead of the local subnets.') }),
     readOnly: true,
   }, async ({ hosts }) => {
     const found = await discover({ port: ctx.conn.port, ...(hosts ? { hosts: hosts.flatMap(expandHosts) } : {}) });
     const data = found.map((f) => ({ host: f.host, port: f.port, platform: f.agent.platform, agent_version: f.agent.agentVersion, mode: f.agent.mode }));
-    return ok(found.length ? `Found ${found.length} device(s): ${data.map((d) => `${d.host} (${d.platform} agent v${d.agent_version}, ${d.mode})`).join("; ")}` : `No agent found. Open the "Nintendo Dev Agent" app on the console (same Wi-Fi).`, { devices: data });
+    return ok(found.length ? `Found ${found.length} device(s): ${data.map((d) => `${d.host} (${d.platform} agent v${d.agent_version}, ${d.mode})`).join("; ")}` : `No agent found. Open the "NSD Bridge" app on the console (same Wi-Fi).`, { devices: data });
   });
 
   tool("nintendo_ping", {

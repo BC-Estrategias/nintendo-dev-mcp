@@ -1,9 +1,9 @@
-# Nintendo Dev MCP
+# NSD Bridge
 
 Turn a Nintendo 3DS running custom firmware (Luma3DS) into a remote development target that AI agents (Claude Code, Codex, …) can operate through [MCP](https://modelcontextprotocol.io) — over your own Wi-Fi, from your own computer. Nothing is hosted anywhere.
 
 ```
-AI agent ⇄ MCP (stdio) ⇄ ndev bridge (your computer) ⇄ NDP v1 over TCP/Wi-Fi ⇄ Nintendo Dev Agent (3DS app)
+AI agent ⇄ MCP (stdio) ⇄ ndev bridge (your computer) ⇄ NDP v1 over TCP/Wi-Fi ⇄ NSD Bridge (3DS app)
 Browser ⇄ the same page, served by the 3DS app on port 8080 (NDP over WebSocket) ⇄ ┘
 ```
 

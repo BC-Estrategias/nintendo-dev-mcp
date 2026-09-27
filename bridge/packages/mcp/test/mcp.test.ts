@@ -331,7 +331,7 @@ suite("ndev-mcp over stdio", () => {
       await d.init("claude");
       const r = await d.call("nintendo_ping");
       assert.equal(r.isError, true);
-      assert.match(text(r), /Nintendo Dev Agent/);
+      assert.match(text(r), /NSD Bridge/);
       assert.match(text(r), /nintendo_find_device/);
       assert.match(text(await d.call("nintendo_fs_stat", { path: "/" })), /Error/);
     } finally {

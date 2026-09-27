@@ -2,7 +2,7 @@
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createServer, type ServerOptions } from "./server.ts";
 
-const USAGE = `ndev-mcp — MCP server (stdio) for a Nintendo 3DS running the Nintendo Dev Agent
+const USAGE = `ndev-mcp — MCP server (stdio) for a Nintendo 3DS running NSD Bridge
 
 Options:
   --host <ip|auto>        console address (default: $NDEV_HOST, then the last known one, then a LAN scan)

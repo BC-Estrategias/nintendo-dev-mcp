@@ -14,22 +14,21 @@ def png(path, w, h, pixel):
 # 5x7 pixel font for the few letters we need
 FONT = {
     "N": ["10001", "11001", "10101", "10101", "10011", "10001", "10001"],
+    "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
     "D": ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
-    "E": ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
-    "V": ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
 }
 
 def banner(x, y):
-    # dark blue gradient with the letters NDEV in white and a thin cyan line
-    base = (12 + y // 6, 22 + y // 5, 60 + y // 3)
-    text, scale, ox, oy = "NDEV", 9, 34, 30
+    # NSD Bridge red gradient with "NSD" in white and a thin white line
+    base = (150 + y * 50 // 127, 20 + y * 20 // 127, 28 + y * 24 // 127)
+    text, scale, ox, oy = "NSD", 9, 52, 30
     cx = (x - ox) // (6 * scale)
     if 0 <= cx < len(text) and (x - ox) % (6 * scale) < 5 * scale:
         gx, gy = ((x - ox) % (6 * scale)) // scale, (y - oy) // scale
         if 0 <= gy < 7 and FONT[text[cx]][gy][gx] == "1":
             return (245, 245, 250)
     if 104 <= y <= 106:
-        return (60, 200, 230)
+        return (245, 245, 250)
     return base
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ export interface ServerOptions extends ConnectionOptions {
   auditFile?: string | null | undefined;
 }
 
-export const INSTRUCTIONS = `Tools for operating a REAL Nintendo 3DS (with custom firmware) over Wi-Fi through the "Nintendo Dev Agent" app running on the console. They read and — only when the console user has enabled DEVELOPMENT mode — write the console's SD card.
+export const INSTRUCTIONS = `Tools for operating a REAL Nintendo 3DS (with custom firmware) over Wi-Fi through the "NSD Bridge" app running on the console. They read and — only when the console user has enabled DEVELOPMENT mode — write the console's SD card.
 - Start with nintendo_device_info (or nintendo_find_device if the console cannot be reached: its IP changes).
 - Writes modify real storage. They are atomic and never overwrite silently, are limited to the agent's writable folders (default /3ds/nintendo-dev-agent) and always refuse protected zones (/luma, /Nintendo 3DS, /boot.firm, ...). If the agent is READ_ONLY, ask the user to press X on the console.
 - Nothing is deleted for real: nintendo_fs_delete moves items to a recoverable trash.

@@ -5,7 +5,7 @@
   const NDP = (globalThis.NDP = globalThis.NDP || {});
 
   const PT = {
-    appName: "Nintendo Dev Agent", files: "Arquivos", settings: "Configurações", faq: "FAQ",
+    appName: "NSD Bridge", files: "Arquivos", settings: "Configurações", faq: "FAQ",
     // generic
     ok: "OK", cancel: "Cancelar", close: "Fechar", open: "Abrir", view: "Ver", save: "Salvar", copy: "Copiar", copied: "Copiado.", copyFailed: "Não consegui copiar.",
     refresh: "Atualizar", loading: "Carregando…", name: "Nome", size: "Tamanho", type: "Tipo", folder: "Pasta", file: "Arquivo", up: "Subir uma pasta",
@@ -44,7 +44,7 @@
     "name.empty": "Digite um nome.", "name.chars": "O nome não pode ter \\ / : * ? \" < > | nem caracteres de controle.", "name.trailing": "O nome não pode terminar com ponto ou espaço.",
     "name.tilde": "Evite “~” seguido de número no nome (o cartão SD confunde com nomes curtos).", "name.long": "Nome longo demais (máximo 255 bytes).",
     // connection
-    connecting: "Conectando ao console…", cannotReach: "Não consegui falar com o console", cannotReachBody: "Confira se o app Nintendo Dev Agent está aberto no 3DS, se o computador está na mesma rede Wi-Fi e se este endereço é o que aparece na tela de cima do console (o IP muda quando o console reconecta).",
+    connecting: "Conectando ao console…", cannotReach: "Não consegui falar com o console", cannotReachBody: "Confira se o app NSD Bridge está aberto no 3DS, se o computador está na mesma rede Wi-Fi e se este endereço é o que aparece na tela de cima do console (o IP muda quando o console reconecta).",
     retryNow: "Tentar agora", connectionLost: "Conexão perdida.", retryingIn: "Nova tentativa em {0} s.",
     "state.connecting": "Conectando", "state.pairing": "Precisa parear", "state.ready": "Conectado", "state.offline": "Sem conexão", "state.replaced": "Em outra aba",
     replacedTitle: "A página foi aberta em outro lugar", replacedBody: "O console atende uma página por vez, e outra aba ou navegador assumiu a conexão. Feche a outra ou use esta.", useHere: "Usar esta aba",
@@ -70,7 +70,7 @@
     // FAQ
     "faq.intro": "Respostas rápidas. Clique numa pergunta para abrir.",
     "faq.what.q": "O que é esta página?",
-    "faq.what.a": "É o gerenciador de arquivos do seu 3DS, servido pelo próprio app Nintendo Dev Agent que roda no console. Daqui você navega, vê, edita, envia (arrastando e soltando), baixa, renomeia e apaga arquivos do cartão SD, como um FTP, sem instalar nada.\nSó funciona enquanto o app está aberto no console e o computador está na mesma rede Wi-Fi. O servidor MCP para assistentes de IA continua funcionando ao mesmo tempo, sem mudar nada.",
+    "faq.what.a": "É o gerenciador de arquivos do seu 3DS, servido pelo próprio app NSD Bridge que roda no console. Daqui você navega, vê, edita, envia (arrastando e soltando), baixa, renomeia e apaga arquivos do cartão SD, como um FTP, sem instalar nada.\nSó funciona enquanto o app está aberto no console e o computador está na mesma rede Wi-Fi. O servidor MCP para assistentes de IA continua funcionando ao mesmo tempo, sem mudar nada.",
     "faq.pairing.q": "Como conecto e pareio este navegador?",
     "faq.pairing.a": "O console só atende computadores e navegadores que você autorizou. Na primeira vez: aperte Y no 3DS (abre o pareamento por 2 minutos), clique em Parear na página e confira se o número de 6 dígitos que aparece nela é o MESMO da tela de cima do console; se for, aperte A no console (B recusa). Pronto, sem digitar nada.\nO número garante que ninguém está no meio da conversa; a chave é combinada sem nunca viajar pela rede. Com o computador (ndev pair) é igual: ele mostra o número e você aperta A. Ainda dá para parear digitando o código de 16 caracteres.\nA chave fica guardada neste navegador (ou só até fechar a aba, se você desmarcar “Lembrar”). Para remover: Configurações → Esquecer este navegador. Para esquecer todos os computadores de uma vez: SELECT duas vezes no console.\nSó um navegador/aba fica conectado por vez: abrir a página em outra aba desconecta a anterior.\nO navegador guarda a chave por endereço (IP): se o IP do console mudar (ele reconectou, por exemplo), a página passa a rodar em outro endereço e a chave salva no antigo fica invisível para ela — é preciso parear de novo (leva uns 10 segundos). Para isso não acontecer, reserve um IP fixo para o 3DS no seu roteador (pela MAC address dele, na tela de configuração do roteador); com IP fixo, o endereço nunca muda e o pareamento sempre é lembrado.",
     "faq.keys.q": "O que cada botão faz no console?",
@@ -97,11 +97,11 @@
     "faq.trouble.q": "Deu problema. E agora?",
     "faq.trouble.a": "- Não abre: o app precisa estar aberto no 3DS, o computador na mesma rede Wi-Fi e o endereço igual ao da tela de cima do console (o IP muda quando ele reconecta).\n- “Somente leitura”: aperte X no console.\n- Pasta não liberada (PROTECTED_PATH): aperte A no console e libere a pasta.\n- Ocupado (BUSY): o console faz uma coisa por vez; espere alguns segundos.\n- Lento ou caindo: o Wi-Fi do 3DS dorme quando ocioso e a primeira ação depois de uma pausa demora; a página reconecta sozinha.\n- Janela de pareamento fechada: aperte Y de novo.\n- Console travou com erro “mcu” depois de abrir o menu Rosalina: nos nossos testes isso aconteceu uma vez com o app aberto; feche o app antes de usar o Rosalina e reinicie o console.",
     "faq.about.q": "Sobre",
-    "faq.about.a": "Nintendo Dev Agent é software livre (Apache-2.0). Código, versões e problemas: https://github.com/BC-Estrategias/nintendo-dev-mcp\nEsta página e o app do console são um só programa; a versão aparece em Configurações.",
+    "faq.about.a": "NSD Bridge é software livre (Apache-2.0). Código, versões e problemas: https://github.com/BC-Estrategias/nintendo-dev-mcp\nEsta página e o app do console são um só programa; a versão aparece em Configurações.",
   };
 
   const EN = {
-    appName: "Nintendo Dev Agent", files: "Files", settings: "Settings", faq: "FAQ",
+    appName: "NSD Bridge", files: "Files", settings: "Settings", faq: "FAQ",
     ok: "OK", cancel: "Cancel", close: "Close", open: "Open", view: "View", save: "Save", copy: "Copy", copied: "Copied.", copyFailed: "Could not copy.",
     refresh: "Refresh", loading: "Loading…", name: "Name", size: "Size", type: "Type", folder: "Folder", file: "File", up: "Up one folder",
     download: "Download", downloading: "Downloading {0}…", downloadingPct: "Downloading {0}… {1}%", downloaded: "{0} downloaded.", upload: "Upload", rename: "Rename", renamed: "Renamed.", restore: "Restore",
@@ -134,7 +134,7 @@
     unsavedTitle: "Unsaved changes", unsavedBody: "If you close now, the changes to this file will be lost.", discard: "Discard",
     "name.empty": "Type a name.", "name.chars": "The name cannot contain \\ / : * ? \" < > | or control characters.", "name.trailing": "The name cannot end with a dot or a space.",
     "name.tilde": "Avoid “~” followed by a digit in the name (the SD card confuses it with short names).", "name.long": "Name too long (255 bytes at most).",
-    connecting: "Connecting to the console…", cannotReach: "Could not reach the console", cannotReachBody: "Check that the Nintendo Dev Agent app is open on the 3DS, that this computer is on the same Wi-Fi network, and that this address is the one on the console's top screen (the IP changes when the console reconnects).",
+    connecting: "Connecting to the console…", cannotReach: "Could not reach the console", cannotReachBody: "Check that the NSD Bridge app is open on the 3DS, that this computer is on the same Wi-Fi network, and that this address is the one on the console's top screen (the IP changes when the console reconnects).",
     retryNow: "Try now", connectionLost: "Connection lost.", retryingIn: "Retrying in {0} s.",
     "state.connecting": "Connecting", "state.pairing": "Needs pairing", "state.ready": "Connected", "state.offline": "Offline", "state.replaced": "In another tab",
     replacedTitle: "The page was opened somewhere else", replacedBody: "The console serves one page at a time, and another tab or browser took over the connection. Close the other one or use this one.", useHere: "Use this tab",
@@ -156,7 +156,7 @@
     "err.TOO_LARGE": "Too large.", "err.HASH_MISMATCH": "The content does not match (SHA-256): nothing was written.", "err.TIMEOUT": "The console took too long to answer.", "err.UNSUPPORTED_COMMAND": "The console app is too old for this: update it.", "err.HELLO_REQUIRED": "Connection out of order.", "err.BAD_FRAME": "Invalid message.", "err.PATH_INVALID": "Invalid path or name.",
     "faq.intro": "Quick answers. Click a question to open it.",
     "faq.what.q": "What is this page?",
-    "faq.what.a": "It is the file manager of your 3DS, served by the Nintendo Dev Agent app running on the console itself. From here you browse, view, edit, upload (by drag and drop), download, rename and delete files on the SD card, like an FTP, with nothing to install.\nIt only works while the app is open on the console and this computer is on the same Wi-Fi network. The MCP server for AI assistants keeps working at the same time, unchanged.",
+    "faq.what.a": "It is the file manager of your 3DS, served by the NSD Bridge app running on the console itself. From here you browse, view, edit, upload (by drag and drop), download, rename and delete files on the SD card, like an FTP, with nothing to install.\nIt only works while the app is open on the console and this computer is on the same Wi-Fi network. The MCP server for AI assistants keeps working at the same time, unchanged.",
     "faq.pairing.q": "How do I connect and pair this browser?",
     "faq.pairing.a": "The console only serves computers and browsers you authorized. The first time: press Y on the 3DS (opens pairing for 2 minutes), click Pair on the page and check that the 6-digit number it shows is the SAME as on the console's top screen; if it is, press A on the console (B refuses). Done, nothing to type.\nThe number makes sure nobody is in the middle of the conversation; the key is agreed without ever travelling over the network. Pairing a computer (ndev pair) works the same way: it shows the number and you press A. You can still pair by typing the 16-character code.\nThe key is stored in this browser (or only until the tab closes, if you untick “Remember”). To remove it: Settings → Forget this browser. To forget every computer at once: press SELECT twice on the console.\nOnly one browser tab is connected at a time: opening the page in another tab disconnects the previous one.\nThe browser stores the key per address (IP): if the console's IP changes (it reconnected, for example), the page now runs at a different address and cannot see the key saved under the old one — you will need to pair again (takes about 10 seconds). To avoid this, reserve a fixed IP for the 3DS on your router (by its MAC address, in the router's settings page); with a fixed IP the address never changes and the pairing is always remembered.",
     "faq.keys.q": "What does each console button do?",
@@ -183,7 +183,7 @@
     "faq.trouble.q": "Something went wrong. Now what?",
     "faq.trouble.a": "- It won't open: the app must be open on the 3DS, this computer on the same Wi-Fi, and the address must match the console's top screen (the IP changes when it reconnects).\n- “Read-only”: press X on the console.\n- Folder not opened (PROTECTED_PATH): press A on the console and open the folder.\n- Busy (BUSY): the console does one thing at a time; wait a few seconds.\n- Slow or dropping: the 3DS Wi-Fi sleeps when idle and the first action after a pause is slow; the page reconnects by itself.\n- Pairing window closed: press Y again.\n- Console froze with a “mcu” error after opening the Rosalina menu: in our tests this happened once with the app open; close the app before using Rosalina and reboot the console.",
     "faq.about.q": "About",
-    "faq.about.a": "Nintendo Dev Agent is free software (Apache-2.0). Source, releases and issues: https://github.com/BC-Estrategias/nintendo-dev-mcp\nThis page and the console app are one program; the version is shown in Settings.",
+    "faq.about.a": "NSD Bridge is free software (Apache-2.0). Source, releases and issues: https://github.com/BC-Estrategias/nintendo-dev-mcp\nThis page and the console app are one program; the version is shown in Settings.",
   };
 
   const DICT = { "pt-BR": PT, en: EN };

@@ -1,7 +1,10 @@
 # Changelog
 
+## 1.5.2 — renamed to NSD Bridge
+- The project is renamed from Nintendo Dev Agent / Nintendo Dev MCP to **NSD Bridge**, to reflect it growing past its original 3DS-only MCP scope: a web file manager (the flagship feature), CLI, and MCP server, with DSi and Switch support planned (the portable `agent/common` core was designed for this from the start). Every place that showed the old name now shows the new one: the console's own screen, the CIA title (Home Menu, FBI), the Home Menu banner, the web page (title, header, FAQ), and the MCP/CLI help text and error messages. Internal identifiers (the NDP protocol name, the `ndev` CLI command, C/TypeScript symbol names) are unchanged — this is a display-name change, not a protocol or tooling break.
+
 ## 1.5.1 — new icon
-- Custom Home Menu icon and web page favicon (project renamed to NSD Bridge). No functional changes.
+- Custom Home Menu icon and web page favicon. No functional changes.
 
 ## 1.5.0 — paired devices management
 - **View and remove paired devices** on the Settings page: a new card lists every computer or browser paired with the console, even ones not connected right now, and lets you forget any of them from the page. Two protocol commands, `PAIR_LIST` and `PAIR_FORGET` (spec-compatible additions, existing clients unaffected): any authenticated device may list and prune the console's full pairing list, mirroring the trust an opened folder already grants and the SELECT×2 "forget all" already on the console. `ndp_keystore_remove` compacts the on-console key store in place (file format unchanged). Covered by new C unit tests and a TypeScript integration test against the real host agent binary over TCP (pair two devices, list, cross-device forget, revocation on the next connection, self-forget without dropping the live session).
