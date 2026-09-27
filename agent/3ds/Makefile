@@ -20,6 +20,7 @@ AGENT_VERSION   := $(shell sed -n 's/^\#define NDP_AGENT_VERSION "\(.*\)"$$/\1/p
 APP_TITLE       := Nintendo Dev Agent
 APP_DESCRIPTION := v$(AGENT_VERSION) - remote dev agent
 APP_AUTHOR      := BC Estrategias
+ICON            := icon.png
 
 ARCH    := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 
