@@ -18,7 +18,7 @@ INCLUDES    := source ../common/include ../posix/include ../web
 # The version comes from the single source of truth (shown in the Homebrew Launcher description).
 AGENT_VERSION   := $(shell sed -n 's/^\#define NDP_AGENT_VERSION "\(.*\)"$$/\1/p' $(TOPDIR)/../common/include/ndp/ndp_defs.h)
 APP_TITLE       := NSD Bridge
-APP_DESCRIPTION := v$(AGENT_VERSION) - remote dev agent
+APP_DESCRIPTION := v$(AGENT_VERSION) - wireless SD card bridge
 APP_AUTHOR      := BC Estrategias
 ICON            := icon.png
 

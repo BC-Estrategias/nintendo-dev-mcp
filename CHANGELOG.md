@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.5.5 — leftover old description fixed
+- `APP_DESCRIPTION` in the Makefile still said "remote dev agent" (shown in the Homebrew Launcher / HOME Menu's suspended-software info) after the rename to NSD Bridge. Now "wireless SD card bridge".
+
 ## 1.5.4 — renamed build artifacts
 - Build artifacts renamed from `nintendo-dev-agent*` to `nsd-bridge*` (3DS target, CIA, SMDH, RSF), matching the project's new name. `scripts/build-3ds-cia.sh` now also copies the CIA to a version-less `dist/nsd-bridge.cia`, so `github.com/BC-Estrategias/nsd-bridge/releases/latest/download/nsd-bridge.cia` always resolves to the current release without editing a QR code or link every time.
 
