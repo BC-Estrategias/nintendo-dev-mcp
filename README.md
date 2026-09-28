@@ -1,5 +1,7 @@
 # NSD Bridge
 
+[Português (Brasil)](README.pt-BR.md)
+
 **A wireless bridge to your Nintendo 3DS's SD card — from any browser, your terminal, or an AI coding assistant. Nothing hosted anywhere: it runs entirely on your own Wi-Fi.**
 
 ![License](https://img.shields.io/github/license/BC-Estrategias/nsd-bridge)
