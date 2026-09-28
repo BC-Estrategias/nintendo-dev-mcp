@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds dist/nintendo-dev-agent-vX.Y.Z.cia (a CIA you install with FBI to get a Home Menu icon).
+# Builds dist/nsd-bridge-vX.Y.Z.cia (a CIA you install with FBI to get a Home Menu icon), plus a
+# version-less dist/nsd-bridge.cia copy so the GitHub "latest release" download URL never changes.
 # Needs third_party/bin/makerom and third_party/bin/bannertool (see docs/research/cia-toolchain.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -15,7 +16,7 @@ IFS=. read -r MAJOR MINOR MICRO <<<"$VERSION"
 # enum), so the TMD "major" slot carries major*10+minor (1.0.0 -> 10, 0.6.3 -> 6): strictly increasing, which is all
 # FBI needs to update in place. Limits: major*10+minor <= 63 and micro <= 15.
 
-# the agent itself (also refreshes agent/3ds/nintendo-dev-agent.elf and .smdh)
+# the agent itself (also refreshes agent/3ds/nsd-bridge.elf and .smdh)
 ./scripts/build-3ds.sh >/dev/null
 
 W=build-cia
@@ -23,11 +24,12 @@ rm -rf "$W"
 mkdir -p "$W" dist
 python3 agent/3ds/cia/make_banner_assets.py "$W"
 bannertool makebanner -i "$W/banner.png" -a "$W/banner.wav" -o "$W/banner.bnr" >/dev/null
-OUT="nintendo-dev-agent-v${VERSION}.cia"
-rm -f dist/nintendo-dev-agent*.cia
-makerom -f cia -o "dist/$OUT" -elf agent/3ds/nintendo-dev-agent.elf -rsf agent/3ds/cia/nintendo-dev-agent.rsf \
-  -icon agent/3ds/nintendo-dev-agent.smdh -banner "$W/banner.bnr" -ver "$(( ((MAJOR * 10 + MINOR) << 10) | MICRO ))" \
+OUT="nsd-bridge-v${VERSION}.cia"
+rm -f dist/nsd-bridge*.cia
+makerom -f cia -o "dist/$OUT" -elf agent/3ds/nsd-bridge.elf -rsf agent/3ds/cia/nsd-bridge.rsf \
+  -icon agent/3ds/nsd-bridge.smdh -banner "$W/banner.bnr" -ver "$(( ((MAJOR * 10 + MINOR) << 10) | MICRO ))" \
   -target t 2>&1 | grep -E "ERROR|error|Warning" || true
 [ -s "dist/$OUT" ] || { echo "makerom failed"; exit 1; }
+cp "dist/$OUT" "dist/nsd-bridge.cia" # version-less copy: what the GitHub "latest" URL and the README's QR code point to
 ( cd dist && shasum -a 256 "$OUT" | tee -a SHA256SUMS )
 echo "built: dist/$OUT ($(wc -c < "dist/$OUT") bytes), title id 000400000BD00100"

@@ -9,7 +9,7 @@ endif
 TOPDIR ?= $(CURDIR)
 include $(DEVKITARM)/3ds_rules
 
-TARGET      := nintendo-dev-agent
+TARGET      := nsd-bridge
 BUILD       := build
 # platform code + the platform-neutral core + the shared BSD-socket server + the embedded web page
 SOURCES     := source ../common/src ../posix/src ../web

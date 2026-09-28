@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.5.4 — renamed build artifacts
+- Build artifacts renamed from `nintendo-dev-agent*` to `nsd-bridge*` (3DS target, CIA, SMDH, RSF), matching the project's new name. `scripts/build-3ds-cia.sh` now also copies the CIA to a version-less `dist/nsd-bridge.cia`, so `github.com/BC-Estrategias/nsd-bridge/releases/latest/download/nsd-bridge.cia` always resolves to the current release without editing a QR code or link every time.
+
 ## 1.5.3 — GitHub repository renamed
 - The repository moved to `BC-Estrategias/nsd-bridge`; the web page's FAQ links (GitHub, MCP install path) now point there. GitHub redirects the old `nintendo-dev-mcp` URL, but new links use the new name directly.
 

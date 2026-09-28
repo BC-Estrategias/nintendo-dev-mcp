@@ -19,9 +19,9 @@ make -C agent/3ds
 
 # The version is part of the file name so different builds are never confused in Finder or on the SD.
 mkdir -p dist
-rm -f dist/nintendo-dev-agent*.3dsx dist/nintendo-dev-agent*.smdh
-OUT="nintendo-dev-agent-v${VERSION}"
-cp agent/3ds/nintendo-dev-agent.3dsx "dist/${OUT}.3dsx"
-cp agent/3ds/nintendo-dev-agent.smdh "dist/${OUT}.smdh"
+rm -f dist/nsd-bridge*.3dsx dist/nsd-bridge*.smdh
+OUT="nsd-bridge-v${VERSION}"
+cp agent/3ds/nsd-bridge.3dsx "dist/${OUT}.3dsx"
+cp agent/3ds/nsd-bridge.smdh "dist/${OUT}.smdh"
 ( cd dist && shasum -a 256 "${OUT}.3dsx" "${OUT}.smdh" | tee SHA256SUMS )
 echo "built: dist/${OUT}.3dsx ($(wc -c < "dist/${OUT}.3dsx") bytes)"
