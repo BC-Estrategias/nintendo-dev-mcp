@@ -8,7 +8,7 @@
   const t = (...a) => NDP.i18n.t(...a);
 
   const SECTIONS = ["what", "pairing", "keys", "modes", "upload", "edit", "organize", "trash", "mcp", "security", "trouble", "about"];
-  const REPO = "https://github.com/BC-Estrategias/nintendo-dev-mcp";
+  const REPO = "https://github.com/BC-Estrategias/nsd-bridge";
 
   function prose(text) {
     const out = [];

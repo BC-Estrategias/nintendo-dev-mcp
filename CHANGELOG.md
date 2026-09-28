@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.5.3 — GitHub repository renamed
+- The repository moved to `BC-Estrategias/nsd-bridge`; the web page's FAQ links (GitHub, MCP install path) now point there. GitHub redirects the old `nintendo-dev-mcp` URL, but new links use the new name directly.
+
 ## 1.5.2 — renamed to NSD Bridge
 - The project is renamed from Nintendo Dev Agent / Nintendo Dev MCP to **NSD Bridge**, to reflect it growing past its original 3DS-only MCP scope: a web file manager (the flagship feature), CLI, and MCP server, with DSi and Switch support planned (the portable `agent/common` core was designed for this from the start). Every place that showed the old name now shows the new one: the console's own screen, the CIA title (Home Menu, FBI), the Home Menu banner, the web page (title, header, FAQ), and the MCP/CLI help text and error messages. Internal identifiers (the NDP protocol name, the `ndev` CLI command, C/TypeScript symbol names) are unchanged — this is a display-name change, not a protocol or tooling break.
 

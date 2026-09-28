@@ -97,7 +97,7 @@
     "faq.trouble.q": "Deu problema. E agora?",
     "faq.trouble.a": "- Não abre: o app precisa estar aberto no 3DS, o computador na mesma rede Wi-Fi e o endereço igual ao da tela de cima do console (o IP muda quando ele reconecta).\n- “Somente leitura”: aperte X no console.\n- Pasta não liberada (PROTECTED_PATH): aperte A no console e libere a pasta.\n- Ocupado (BUSY): o console faz uma coisa por vez; espere alguns segundos.\n- Lento ou caindo: o Wi-Fi do 3DS dorme quando ocioso e a primeira ação depois de uma pausa demora; a página reconecta sozinha.\n- Janela de pareamento fechada: aperte Y de novo.\n- Console travou com erro “mcu” depois de abrir o menu Rosalina: nos nossos testes isso aconteceu uma vez com o app aberto; feche o app antes de usar o Rosalina e reinicie o console.",
     "faq.about.q": "Sobre",
-    "faq.about.a": "NSD Bridge é software livre (Apache-2.0). Código, versões e problemas: https://github.com/BC-Estrategias/nintendo-dev-mcp\nEsta página e o app do console são um só programa; a versão aparece em Configurações.",
+    "faq.about.a": "NSD Bridge é software livre (Apache-2.0). Código, versões e problemas: https://github.com/BC-Estrategias/nsd-bridge\nEsta página e o app do console são um só programa; a versão aparece em Configurações.",
   };
 
   const EN = {
@@ -183,7 +183,7 @@
     "faq.trouble.q": "Something went wrong. Now what?",
     "faq.trouble.a": "- It won't open: the app must be open on the 3DS, this computer on the same Wi-Fi, and the address must match the console's top screen (the IP changes when it reconnects).\n- “Read-only”: press X on the console.\n- Folder not opened (PROTECTED_PATH): press A on the console and open the folder.\n- Busy (BUSY): the console does one thing at a time; wait a few seconds.\n- Slow or dropping: the 3DS Wi-Fi sleeps when idle and the first action after a pause is slow; the page reconnects by itself.\n- Pairing window closed: press Y again.\n- Console froze with a “mcu” error after opening the Rosalina menu: in our tests this happened once with the app open; close the app before using Rosalina and reboot the console.",
     "faq.about.q": "About",
-    "faq.about.a": "NSD Bridge is free software (Apache-2.0). Source, releases and issues: https://github.com/BC-Estrategias/nintendo-dev-mcp\nThis page and the console app are one program; the version is shown in Settings.",
+    "faq.about.a": "NSD Bridge is free software (Apache-2.0). Source, releases and issues: https://github.com/BC-Estrategias/nsd-bridge\nThis page and the console app are one program; the version is shown in Settings.",
   };
 
   const DICT = { "pt-BR": PT, en: EN };
