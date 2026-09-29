@@ -7,6 +7,7 @@
   const { h, fill, icon, toast, dialog, confirmBox, promptBox, contextMenu, copyText, saveBlob } = NDP.ui;
   const U = NDP.util, S = NDP.session;
   const t = (...a) => NDP.i18n.t(...a);
+  const tp = (key, ...args) => NDP.i18n.tp(key, S.info && S.info.platform, ...args);
 
   const st = { cwd: "/", entries: [], selected: new Set(), sort: { key: "name", dir: "asc" }, filter: "", loading: false, error: null, last: null };
   let root, uploads = [], upBusy = false, upPanel = null, clip = null; // clip: {mode: "cut"|"copy", dir, entries}
@@ -16,7 +17,7 @@
   const pathFromHash = () => { const p = decodeURIComponent(location.hash.replace(/^#/, "") || "/"); return p.startsWith("/") ? p : "/"; };
   const inTrash = () => !!U.trashRootOf(st.cwd);
   const canCreate = () => canWrite() && !inTrash();
-  const canWrite = () => U.accessOf(st.cwd, S.access, S.info && S.info.mode) === "write";
+  const canWrite = () => U.accessOf(st.cwd, S.access, S.info && S.info.mode, S.info && S.info.platform) === "write";
   const isReadOnlyMode = () => S.info && S.info.mode === "READ_ONLY";
 
   function errText(e) {
@@ -133,7 +134,7 @@
   }
 
   // ---------------------------------------------------------------------------------------------- clipboard, move/copy to..., trash shortcut
-  const canPickDest = (p) => U.accessOf(p, S.access, S.info && S.info.mode) === "write" && !U.trashRootOf(p);
+  const canPickDest = (p) => U.accessOf(p, S.access, S.info && S.info.mode, S.info && S.info.platform) === "write" && !U.trashRootOf(p);
   const sameNames = (list) => list.map((e) => ({ name: e.name, type: e.type, size: e.size }));
 
   function setClip(mode) {
@@ -358,11 +359,11 @@
   async function startUpload(items, targetDir) {
     if (!items.length) return;
     if (isReadOnlyMode()) { toast(t("readOnlyBanner"), "error", 6000); return; }
-    const access = U.accessOf(targetDir, S.access, S.info.mode);
+    const access = U.accessOf(targetDir, S.access, S.info.mode, S.info.platform);
     if (access !== "write" || U.trashRootOf(targetDir)) { toast(t("notWritableHere"), "error", 7000); return; }
     // the card is FAT32: no file of 4 GiB or more; and it must fit (checked against the free space the console reports)
     const tooBig = items.filter((i) => i.file.size >= 4 * 1024 * 1024 * 1024);
-    if (tooBig.length) { toast(t("fat32Limit", tooBig[0].file.name), "error", 9000); items = items.filter((i) => !tooBig.includes(i)); if (!items.length) return; }
+    if (tooBig.length) { toast(tp("fat32Limit", tooBig[0].file.name), "error", 9000); items = items.filter((i) => !tooBig.includes(i)); if (!items.length) return; }
     const need = items.reduce((n, i) => n + i.file.size, 0);
     if (need > 8 * 1024 * 1024) { try { await S.refreshContext(); } catch (_) { /* use what we have */ } }
     const free = S.device && S.device.sd && S.device.sd.free;
@@ -406,7 +407,7 @@
 
   // ---------------------------------------------------------------------------------------------- rendering
   function banner() {
-    const acc = U.accessOf(st.cwd, S.access, S.info && S.info.mode);
+    const acc = U.accessOf(st.cwd, S.access, S.info && S.info.mode, S.info && S.info.platform);
     if (st.error) {
       if (st.error.statusName === "PROTECTED_PATH") return h("div.banner.warn", null, icon("lock"), h("div", null, h("strong", { text: t("notOpenedTitle") }), h("p", { text: t("notOpenedBody") })));
       return h("div.banner.error", null, icon("warn"), h("div", null, h("strong", { text: t("cannotList") }), h("p", { text: errText(st.error) })));

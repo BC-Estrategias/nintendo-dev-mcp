@@ -40,9 +40,13 @@ static int set_nonblocking(int fd) {
   return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-/* Abortive close: frees the (scarce, on 3DS) socket immediately instead of lingering in TIME_WAIT. */
+/* Abortive close: frees the (scarce, on 3DS) socket immediately instead of lingering in TIME_WAIT.
+ * `struct linger` is a fixed two-int layout (SO_LINGER's documented ABI on every BSD-socket
+ * platform this runs on), defined here instead of taken from <sys/socket.h>: BlocksDS's dswifi
+ * headers define the SO_LINGER constant but never typedef the struct. */
+struct ndp_linger { int l_onoff, l_linger; };
 static void hard_close(int fd) {
-  struct linger lg;
+  struct ndp_linger lg;
   lg.l_onoff = 1;
   lg.l_linger = 0;
   (void)shutdown(fd, SHUT_RDWR);
@@ -380,7 +384,10 @@ static long feed_ndp(ndp_server *s, ndp_conn *c, const uint8_t *p, size_t n, int
         slog(s, "[ERR %lu] %s", (unsigned long)rh.request_id, ndp_status_name(rh.status));
         c->cur_active = 0;
       }
-      { /* try to send right away: most responses fit the socket buffer */
+      { /* try to send right away: most responses fit the socket buffer. Any bytes that don't
+         * (or a streaming transfer's later frames) are picked up by ndp_server_step()'s own
+         * unconditional output pass every step, regardless of what poll() reports -- see there
+         * for why it does not gate this on POLLOUT. */
         int f = flush_out(s, c);
         if (f < 0 || f == 2) return -1;
         if (f == 0 && !ndp_agent_busy(&c->agent)) finish_current(s, c);
@@ -540,7 +547,7 @@ static void http_reply(ndp_http_conn *h, int code, const char *reason, const cha
   h->body = head_only ? NULL : body;
   h->body_len = head_only ? 0 : body_len;
   h->body_off = 0;
-  h->responding = 1;
+  h->responding = 1; /* sent by ndp_server_step()'s own unconditional output pass, not gated on POLLOUT -- see there */
 }
 
 static void http_error(ndp_http_conn *h, int code, const char *reason) {
@@ -723,9 +730,7 @@ int ndp_server_step(ndp_server *s, int timeout_ms) {
         if (ev & POLLNVAL) { close_conn(s, c, "invalid socket"); changed = 1; }
         else if (want_out[slot[k].idx]) {
           if (ev & (POLLERR | POLLHUP)) { close_conn(s, c, "connection error"); changed = 1; }
-          else if (ev & POLLOUT) {
-            if (pump_output(s, c, &changed) < 0) { close_conn(s, c, "send error"); changed = 1; }
-          }
+          /* the send itself is attempted unconditionally below, not gated on POLLOUT -- see there */
         } else {
           on_readable(s, c, ev, &changed);
         }
@@ -733,10 +738,33 @@ int ndp_server_step(ndp_server *s, int timeout_ms) {
         ndp_http_conn *h = &s->http[slot[k].idx];
         if (h->fd != pfd[k].fd) continue;
         if (ev & (POLLERR | POLLHUP | POLLNVAL)) { if (!(ev & POLLIN) || h->responding) { close_http(s, h); continue; } }
-        if (h->responding) http_on_writable(s, h);
-        else if (ev & POLLIN) http_on_readable(s, h, &changed);
+        if (!h->responding && (ev & POLLIN)) http_on_readable(s, h, &changed);
+        /* the send itself is attempted unconditionally below, not gated on POLLOUT -- see there */
       }
     }
+  }
+  /* Always attempt to send anything pending, regardless of what poll() reported above: on this
+   * codebase's lwIP-backed platforms, poll() can fail to ever report a socket POLLOUT-ready again
+   * once it has already been written to once outside of poll()'s own bookkeeping (a direct
+   * flush_out()/send() from feed_ndp() or http_reply(), both of which try to answer a request within
+   * the same step it arrived). Relying on POLLOUT alone left multi-frame transfers -- a file read
+   * past its first chunk, an HTTP body bigger than one socket send buffer -- stalled forever once the
+   * first send() happened outside poll()'s view. A non-blocking send() attempt costs nothing when
+   * there is nothing new to send (want_out/responding is false, or it returns EWOULDBLOCK), so trying
+   * unconditionally every step is free on platforms where POLLOUT does work correctly (their existing
+   * behavior is unchanged: pump_output()/http_on_writable() would have run this step regardless). */
+  for (i = 0; i < 2; i++) {
+    /* Read live, not the want_out[] snapshot taken before poll(): on_readable() above may have fed a
+     * brand-new request/response within this same step, and this way it gets its first send attempt
+     * now instead of waiting a whole extra ndp_server_step() cycle for it. */
+    ndp_conn *c = &s->nc[i];
+    if (c->fd >= 0 && (c->out_len > 0 || c->ctl_len > 0 || ndp_agent_streaming(&c->agent))) {
+      if (pump_output(s, c, &changed) < 0) { close_conn(s, c, "send error"); changed = 1; }
+    }
+  }
+  for (i = 0; i < NDP_WEB_HTTP_SLOTS; i++) {
+    ndp_http_conn *h = &s->http[i];
+    if (h->fd >= 0 && h->responding) http_on_writable(s, h);
   }
   for (i = 0; i < 2; i++) {
     ndp_conn *c = &s->nc[i];

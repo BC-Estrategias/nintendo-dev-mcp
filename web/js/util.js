@@ -101,21 +101,32 @@
   }
 
   // The console's fixed protected zones (docs spec §11): never writable, whatever the owner opens.
-  const NEVER_WRITE = ["/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private", "/3ds/nintendo-dev-agent/config"];
-  const WRITE_EXCEPT = ["/luma/plugins", "/luma/titles"];
-  function writeProtected(path) {
-    for (const z of NEVER_WRITE) {
+  // Different per platform (each agent overrides agent/common's 3DS defaults with its own SD layout --
+  // see ndp_policy_set_default_zones() -- so the page must match, not assume every console is a 3DS).
+  const PROTECTED_ZONES = {
+    "3ds": {
+      neverWrite: ["/Nintendo 3DS", "/luma", "/boot.firm", "/gm9", "/private", "/3ds/nintendo-dev-agent/config"],
+      writeExcept: ["/luma/plugins", "/luma/titles"],
+    },
+    dsi: { neverWrite: ["/_nds", "/nsd-bridge/config"], writeExcept: [] },
+  };
+  /** The platform's protected-zone tables, falling back to the 3DS's (also the default when `platform`
+   * is unknown/omitted: existing callers -- and existing tests -- assume that console). */
+  function protectedZonesFor(platform) { return PROTECTED_ZONES[platform] || PROTECTED_ZONES["3ds"]; }
+  function writeProtected(path, platform) {
+    const { neverWrite, writeExcept } = protectedZonesFor(platform);
+    for (const z of neverWrite) {
       if (!inside(path, z)) continue;
-      const lifted = WRITE_EXCEPT.some((e) => inside(path, e) && inside(e, z) && !inside(z, e));
+      const lifted = writeExcept.some((e) => inside(path, e) && inside(e, z) && !inside(z, e));
       if (!lifted) return true;
     }
     return false;
   }
 
   /** What the page can promise about `path` given ACCESS_INFO: "write" | "read" | "none" (from the console's view). */
-  function accessOf(path, access, mode) {
+  function accessOf(path, access, mode, platform) {
     if (!access) return "read";
-    const canWrite = mode !== "READ_ONLY" && access.writeRoots.some((r) => inside(path, r)) && !writeProtected(path);
+    const canWrite = mode !== "READ_ONLY" && access.writeRoots.some((r) => inside(path, r)) && !writeProtected(path, platform);
     if (canWrite) return "write";
     return access.readRoots.some((r) => inside(path, r)) ? "read" : "none";
   }
@@ -149,5 +160,5 @@
     };
   }
 
-  NDP.util = { blobCollector, inside, join, parent, basename, ext, crumbs, formatSize, formatRate, formatEta, isImage, isTextName, imageMime, looksBinary, uniqueName, nameProblem, sortEntries, writeProtected, accessOf, trashRootOf };
+  NDP.util = { blobCollector, inside, join, parent, basename, ext, crumbs, formatSize, formatRate, formatEta, isImage, isTextName, imageMime, looksBinary, uniqueName, nameProblem, sortEntries, writeProtected, accessOf, trashRootOf, protectedZonesFor };
 })();

@@ -14,8 +14,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifdef __3DS__
-#define lstat stat /* the sdmc devoptab has no symlinks */
+#if defined(__3DS__) || defined(__NDS__)
+#define lstat stat /* FAT (sdmc: on 3DS, sd: on DSi) has no symlinks */
 #endif
 
 #define FULL_MAX 1400
@@ -28,7 +28,7 @@ static int map_errno(int e) {
   }
 }
 
-#ifdef __3DS__
+#if defined(__3DS__) || defined(__NDS__)
 static int contained(const ndp_posix_fs_ctx *c, const char *full) { (void)c; (void)full; return 1; } /* FAT: no symlinks */
 #else
 /* lstat() only looks at the LAST path component, so a symlinked directory inside the root could lead

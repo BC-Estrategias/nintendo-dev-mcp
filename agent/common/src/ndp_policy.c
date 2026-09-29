@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "ndp/ndp_access.h"
+
 int ndp_pathlist_add(ndp_pathlist *l, const char *path) {
   char norm[NDP_PATH_MAX + 1];
   size_t n = strlen(path);
@@ -21,11 +23,24 @@ static const char *const DEFAULT_NEVER_WRITE[] = {"/Nintendo 3DS", "/luma", "/bo
  * it (config.ini, payloads, sysmodules, ...) can stop the console from booting. */
 static const char *const DEFAULT_WRITE_EXCEPT[] = {"/luma/plugins", "/luma/titles"};
 
+static const char *const *g_never_read = DEFAULT_NEVER_READ, *const *g_never_write = DEFAULT_NEVER_WRITE,
+                         *const *g_write_except = DEFAULT_WRITE_EXCEPT;
+static int g_n_never_read = (int)(sizeof DEFAULT_NEVER_READ / sizeof DEFAULT_NEVER_READ[0]),
+           g_n_never_write = (int)(sizeof DEFAULT_NEVER_WRITE / sizeof DEFAULT_NEVER_WRITE[0]),
+           g_n_write_except = (int)(sizeof DEFAULT_WRITE_EXCEPT / sizeof DEFAULT_WRITE_EXCEPT[0]);
+
+void ndp_policy_set_default_zones(const char *const *never_read, int n_never_read, const char *const *never_write,
+                                  int n_never_write, const char *const *write_except, int n_write_except) {
+  g_never_read = never_read; g_n_never_read = n_never_read;
+  g_never_write = never_write; g_n_never_write = n_never_write;
+  g_write_except = write_except; g_n_write_except = n_write_except;
+}
+
 int ndp_policy_default_zones(int which, const char *const **list) {
-  if (which == 2) { *list = DEFAULT_WRITE_EXCEPT; return (int)(sizeof DEFAULT_WRITE_EXCEPT / sizeof DEFAULT_WRITE_EXCEPT[0]); }
-  if (which == 1) { *list = DEFAULT_NEVER_WRITE; return (int)(sizeof DEFAULT_NEVER_WRITE / sizeof DEFAULT_NEVER_WRITE[0]); }
-  *list = DEFAULT_NEVER_READ;
-  return (int)(sizeof DEFAULT_NEVER_READ / sizeof DEFAULT_NEVER_READ[0]);
+  if (which == 2) { *list = g_write_except; return g_n_write_except; }
+  if (which == 1) { *list = g_never_write; return g_n_never_write; }
+  *list = g_never_read;
+  return g_n_never_read;
 }
 
 int ndp_write_protected(const char *const *zones, int nz, const char *const *exc, int ne, const char *norm) {
@@ -45,7 +60,7 @@ void ndp_policy_init_default(ndp_policy *p) {
   int i, n;
   memset(p, 0, sizeof *p);
   (void)ndp_pathlist_add(&p->read_roots, "/");
-  (void)ndp_pathlist_add(&p->write_roots, "/3ds/nintendo-dev-agent");
+  (void)ndp_pathlist_add(&p->write_roots, ndp_workspace());
   n = ndp_policy_default_zones(0, &z);
   for (i = 0; i < n; i++) (void)ndp_pathlist_add(&p->never_read, z[i]);
   n = ndp_policy_default_zones(1, &z);

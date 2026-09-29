@@ -26,7 +26,15 @@ typedef struct {
 /* Normalizes and appends `path`. Returns NDP_OK, NDP_ST_PATH_INVALID or NDP_ST_TOO_LARGE. */
 int ndp_pathlist_add(ndp_pathlist *l, const char *path);
 
-/* Spec §10 defaults: read "/", write "/3ds/nintendo-dev-agent", plus the never_* zones. */
+/* Overrides the built-in (3DS: /luma, /Nintendo 3DS, /boot.firm, /gm9, /private, the workspace's own config
+ * folder) never_read/never_write/write_except zones -- a platform whose SD layout has different system files
+ * to protect (e.g. the DSi build's /_nds, TWiLight Menu++'s own folder) calls this once at startup, before
+ * touching any ndp_access/ndp_policy function. The arrays are borrowed and must outlive the process: pass
+ * static arrays, never something on the stack. */
+void ndp_policy_set_default_zones(const char *const *never_read, int n_never_read, const char *const *never_write,
+                                  int n_never_write, const char *const *write_except, int n_write_except);
+
+/* Spec §10 defaults: read "/", write the workspace (ndp_workspace()), plus the never_* zones. */
 void ndp_policy_init_default(ndp_policy *p);
 
 /* The built-in protected zones, without building a whole policy on the stack: `which` 0 = never_read,

@@ -19,7 +19,7 @@ INCLUDES    := source ../common/include ../posix/include ../web
 AGENT_VERSION   := $(shell sed -n 's/^\#define NDP_AGENT_VERSION "\(.*\)"$$/\1/p' $(TOPDIR)/../common/include/ndp/ndp_defs.h)
 APP_TITLE       := NSD Bridge
 APP_DESCRIPTION := v$(AGENT_VERSION) - wireless SD card bridge
-APP_AUTHOR      := BC Estrategias
+APP_AUTHOR      := BC Labs
 ICON            := icon.png
 
 ARCH    := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft

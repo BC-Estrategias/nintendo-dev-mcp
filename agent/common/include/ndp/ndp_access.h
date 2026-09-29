@@ -1,6 +1,7 @@
 /* The folders the console's owner has opened to the Bridge (spec §11.2). The owner edits this list ON THE
  * CONSOLE; no protocol command changes it. It is turned into the access policy (ndp_policy) that the agent
- * enforces. The agent's own workspace (/3ds/nintendo-dev-agent) is always readable and writable. */
+ * enforces. The agent's own workspace (see ndp_workspace(), "/3ds/nintendo-dev-agent" by default) is always
+ * readable and writable. */
 #ifndef NDP_ACCESS_H
 #define NDP_ACCESS_H
 
@@ -9,8 +10,14 @@
 
 #include "ndp/ndp_policy.h"
 
-#define NDP_WORKSPACE "/3ds/nintendo-dev-agent"
 #define NDP_ACCESS_MAX 6 /* user entries; with the workspace the policy lists stay within NDP_POLICY_MAX_ENTRIES */
+
+/* The agent's own always-open folder (read+write, exempt from the never_write zones). Defaults to the 3DS's
+ * SD layout; a platform whose layout differs (e.g. the DSi build, "/nsd-bridge") calls ndp_workspace_set()
+ * once at startup, before touching any ndp_access/ndp_policy function. The returned/borrowed pointer must
+ * outlive the process: pass a string literal or a static buffer, never something on the stack. */
+const char *ndp_workspace(void);
+void ndp_workspace_set(const char *path);
 
 typedef enum { NDP_LVL_NONE = 0, NDP_LVL_READ = 1, NDP_LVL_WRITE = 2 } ndp_level; /* WRITE implies READ */
 

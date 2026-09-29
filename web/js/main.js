@@ -6,6 +6,7 @@
   const { h, fill, icon, toast } = NDP.ui;
   const S = NDP.session;
   const t = (...a) => NDP.i18n.t(...a);
+  const tp = (key) => NDP.i18n.tp(key, S.info && S.info.platform);
 
   // ---------------------------------------------------------------------------------------------- preferences
   const PREFS_KEY = "ndev.prefs";
@@ -108,10 +109,10 @@
       S.info && !S.info.pairingOpen && !waiting ? h("div.banner.info", null, icon("help"), h("p", { text: t("pairWindowClosed") })) : null,
       waiting ? h("div.pair-wait", null,
         pairUi.number ? h("div.sas", { "aria-live": "polite", text: pairUi.number }) : h("div.spinner"),
-        h("p.pair-compare", { text: pairUi.number ? t("pairCompare") : t("pairWaiting") }),
+        h("p.pair-compare", { text: pairUi.number ? tp("pairCompare") : t("pairWaiting") }),
         h("div.actions", null, h("button", { type: "button", onclick: () => { pairUi.ctl.abort(); }, text: t("cancel") })))
       : h("div", null,
-        h("ol.steps", null, h("li", { text: t("pairStep1") }), h("li", { text: t("pairStep2") }), h("li", { text: t("pairStep3") })),
+        h("ol.steps", null, h("li", { text: tp("pairStep1") }), h("li", { text: t("pairStep2") }), h("li", { text: t("pairStep3") })),
         pairUi.error ? h("div.field-error", { role: "alert", text: pairUi.error }) : null,
         h("div.actions", null, h("button.primary", { type: "button", onclick: startPairing, text: t("pair") })),
         h("details", null, h("summary", { text: t("pairOptions") }),
@@ -130,7 +131,7 @@
     }
     if (S.state === "connecting") return h("div.center", null, h("div.spinner"), h("p", { text: t("connecting") }));
     if (S.state === "offline" && !everReady) {
-      return h("div.center", null, icon("warn"), h("h2", { text: t("cannotReach") }), h("p", { text: t("cannotReachBody") }),
+      return h("div.center", null, icon("warn"), h("h2", { text: t("cannotReach") }), h("p", { text: tp("cannotReachBody") }),
         h("div.actions", null, h("button.primary", { onclick: () => S.connect(), text: t("retryNow") })));
     }
     return null;

@@ -119,7 +119,7 @@
     const folders = card(t("folders"),
       h("p.muted", { text: t("foldersNote") }),
       acc ? h("div.roots-grid", null, rootsList(t("levelWrite"), acc.writeRoots, "write"), rootsList(t("levelRead"), acc.readRoots.filter((r) => !acc.writeRoots.includes(r)), "read")) : h("p.muted", { text: t("notConnected") }),
-      h("p.muted.small", { text: t("protectedNote") }));
+      h("p.muted.small", { text: t("protectedNote", U.protectedZonesFor(info && info.platform).neverWrite.join(", ")) }));
 
     const paired = S.deviceHex && S.store.read()[S.deviceHex];
     const pairing = card(t("pairing"),

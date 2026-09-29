@@ -26,7 +26,7 @@
   async function open(path, entry) {
     const name = U.basename(path);
     const size = entry && entry.size !== undefined ? entry.size : (await S.run((c) => c.stat(path)).catch(() => ({ size: 0 }))).size;
-    const writable = U.accessOf(path, S.access, S.info && S.info.mode) === "write";
+    const writable = U.accessOf(path, S.access, S.info && S.info.mode, S.info && S.info.platform) === "write";
     const body = h("div.viewer-body", null, h("div.empty", { text: t("loading") }));
     let dirty = false, getText = null;
     const box = () => document.querySelector(".dialog.viewer");

@@ -86,6 +86,19 @@ test("util: what the page promises about a path matches the console's policy", (
   assert.equal(U.accessOf("/dcim/a.jpg", access, "DEVELOPMENT"), "read");
   assert.equal(U.accessOf("/etc", access, "DEVELOPMENT"), "none");
   assert.equal(U.accessOf("/anything", null, "DEVELOPMENT"), "read");
+  // no platform given (or an unrecognized one) falls back to the 3DS's zones, same as every assertion above
+  assert.ok(U.writeProtected("/luma", undefined));
+  assert.ok(U.writeProtected("/luma", "made-up-platform"));
+});
+
+test("util: the DSi agent has its own protected zones, not the 3DS's (each platform overrides the shared defaults)", () => {
+  for (const p of ["/_nds", "/_nds/nds-bootstrap.ini", "/nsd-bridge/config", "/nsd-bridge/config/pairing.bin"]) assert.ok(U.writeProtected(p, "dsi"), p);
+  // the 3DS's own zones do not apply on a DSi card, which has neither of these folders
+  for (const p of ["/luma", "/Nintendo 3DS", "/boot.firm", "/gm9", "/private", "/roms", "/nsd-bridge/hello.txt", "/"]) assert.ok(!U.writeProtected(p, "dsi"), p);
+  const access = { readRoots: ["/nsd-bridge"], writeRoots: ["/nsd-bridge"] };
+  assert.equal(U.accessOf("/nsd-bridge/x", access, "DEVELOPMENT", "dsi"), "write");
+  assert.equal(U.accessOf("/nsd-bridge/config/pairing.bin", access, "DEVELOPMENT", "dsi"), "read"); // protected from writes, but still inside the read root
+  assert.deepEqual(U.protectedZonesFor("dsi").neverWrite, ["/_nds", "/nsd-bridge/config"]);
 });
 
 test("util: blobCollector groups downloaded bytes into blobs without losing or reordering any", async () => {
@@ -149,4 +162,15 @@ test("i18n: t() substitutes, falls back to the key, and honours the chosen langu
   assert.equal(I.t("itemsCount", 3), "3 item(ns)");
   I.setLang("auto");
   assert.equal(I.choice(), "auto");
+});
+
+test("i18n: tp() picks the platform override when one exists, and falls back otherwise", () => {
+  const I = NDP.i18n;
+  I.setLang("en");
+  assert.equal(I.tp("faq.what.a", "dsi"), I.t("faq.what.a.dsi"));
+  assert.notEqual(I.tp("faq.what.a", "dsi"), I.t("faq.what.a"));
+  assert.equal(I.tp("faq.what.a", "3ds"), I.t("faq.what.a")); // no "faq.what.a.3ds" override: falls back
+  assert.equal(I.tp("faq.what.a", undefined), I.t("faq.what.a"));
+  assert.equal(I.tp("faq.keys.a", "made-up-platform"), I.t("faq.keys.a"));
+  I.setLang("auto");
 });

@@ -4,6 +4,11 @@
 
 #include "ndp/ndp_sha256.h"
 
+static const char *g_workspace = "/3ds/nintendo-dev-agent";
+
+const char *ndp_workspace(void) { return g_workspace; }
+void ndp_workspace_set(const char *path) { g_workspace = path; }
+
 void ndp_access_init(ndp_access *a) { memset(a, 0, sizeof *a); }
 
 static int find_entry(const ndp_access *a, const char *norm) {
@@ -17,7 +22,7 @@ static int find_entry(const ndp_access *a, const char *norm) {
 static ndp_level level_from(const ndp_access *a, const char *norm, int skip) {
   ndp_level best = NDP_LVL_NONE;
   int i;
-  if (ndp_path_inside(norm, NDP_WORKSPACE)) best = NDP_LVL_WRITE;
+  if (ndp_path_inside(norm, ndp_workspace())) best = NDP_LVL_WRITE;
   for (i = 0; i < a->count; i++)
     if (i != skip && ndp_path_inside(norm, a->e[i].path) && a->e[i].level > best) best = (ndp_level)a->e[i].level;
   return best;
@@ -94,8 +99,8 @@ void ndp_access_to_policy(const ndp_access *a, ndp_policy *p) {
   ndp_policy_init_default(p);
   p->read_roots.count = 0;
   p->write_roots.count = 0;
-  (void)ndp_pathlist_add(&p->read_roots, NDP_WORKSPACE);
-  (void)ndp_pathlist_add(&p->write_roots, NDP_WORKSPACE);
+  (void)ndp_pathlist_add(&p->read_roots, ndp_workspace());
+  (void)ndp_pathlist_add(&p->write_roots, ndp_workspace());
   for (i = 0; i < a->count; i++) {
     (void)ndp_pathlist_add(&p->read_roots, a->e[i].path);
     if (a->e[i].level == NDP_LVL_WRITE) (void)ndp_pathlist_add(&p->write_roots, a->e[i].path);

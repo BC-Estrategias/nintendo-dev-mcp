@@ -11,7 +11,7 @@ The **web page** (v1.2.0+) uses the same pairing and the same rules: a browser m
 Not protected against: someone who can read your computer's `~/.config/nintendo-dev/keys.json` (owner-only file, but any program running as you can read it, including an assistant with shell access); an eavesdropper on your LAN reading file contents (the channel is authenticated, **not encrypted**); physical access to the console or its SD card.
 
 ## Reporting a vulnerability
-Please do not open a public issue. Contact the maintainers privately (BC Estratégias, via the repository's owner on GitHub) with the affected version and steps to reproduce. We aim to acknowledge within a few days.
+Please do not open a public issue. Contact the maintainers privately (BC Labs, via the repository's owner on GitHub) with the affected version and steps to reproduce. We aim to acknowledge within a few days.
 
 ## Verification done
 The protocol core is tested by an independent Python reference (vectors), sanitizers (ASan/UBSan), mutation testing of the security-critical checks, and hardware tests on a New 3DS. This is not a formal audit.
