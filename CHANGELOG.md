@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0 — DSi platform support
+- **New platform: Nintendo DSi** (`agent/dsi`, BlocksDS/Wonderful Toolchain). Full feature parity with the 3DS agent on real hardware: the NDP protocol (read/write/list/stat), code-based and number-comparison pairing, the two-screen colored status UI with an activity log, the on-console folder access editor (**A**), the embedded web page, SD card free-space reporting, and a Wi-Fi network menu (**L**) that remembers up to 5 networks and reconnects on its own if the link drops. Wireless build updates over the agent's own `FS_WRITE` mean no physical SD-card swapping to iterate.
+- Two real bugs found on real hardware, fixed in **shared** code (`agent/posix`), so the 3DS agent benefits too:
+  - `ndp_posix_fs.c`: `lstat()`→`stat()` aliasing and the FAT symlink-containment bypass were only guarded for `__3DS__`, not the DSi's `__NDS__`, so `FS_WRITE`'s parent-directory check failed with a false `NOT_FOUND`.
+  - `ndp_server.c`: `poll()` on this platform's dswifi/lwIP can permanently stop reporting a socket `POLLOUT`-ready once it has already been written to once outside of `poll()`'s own bookkeeping — silently stalling any multi-frame transfer (a file read, the web page's body) past its first chunk. Fixed generally: output is no longer gated on `POLLOUT` at all, which is free when idle and a no-op change on platforms where `POLLOUT` already worked (3DS, host).
+- The web page's copy was hardcoded for the 3DS (paths, button names, a Wi-Fi speed figure, a 3DS-CFW-specific troubleshooting note) despite being served by both agents from the same bundle. It now picks a `<key>.<platform>` override via the HELLO response's platform field when one exists, falling back to the original text otherwise — covering the FAQ, the pairing screen, and a few status messages.
+- Publisher branding in both agents is now "BC Labs" (was "BC Estrategias"; the DSi build had never set one, so BlocksDS's own project URL leaked into TWiLight Menu++ / flashcart loaders).
+- Known DSi limits: no firmware version or system/app memory reporting (bare-metal homebrew, no OS to ask); Wi-Fi transfers run at ~0.15–0.2 MiB/s (slower than the 3DS's ~0.6–1 MiB/s); an R4i Gold flashcart's own loader fails to associate to Wi-Fi (SD access and the network scan both work) on both a DSi and a DS Lite — untested on other flashcart brands.
+
 ## 1.5.5 — leftover old description fixed
 - `APP_DESCRIPTION` in the Makefile still said "remote dev agent" (shown in the Homebrew Launcher / HOME Menu's suspended-software info) after the rename to NSD Bridge. Now "wireless SD card bridge".
 
